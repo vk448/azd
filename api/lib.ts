@@ -1,8 +1,9 @@
 const BASE = "https://9anime.org.lv/";
 const AJAX = "https://9anime.org.lv/wp-admin/admin-ajax.php";
 const JIKAN = "https://api.jikan.moe/v4";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
-function slugify(t) {
+export function slugify(t: string): string {
   return t
     .toLowerCase()
     .replace(/[:'"()]/g, "")
@@ -12,33 +13,31 @@ function slugify(t) {
     .replace(/^-|-$/g, "");
 }
 
-async function jikanInfo(id) {
-  const r = await fetch(`${JIKAN}/anime/${id}`, {
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
+export async function jikanInfo(id: number) {
+  const r = await fetch(`${JIKAN}/anime/${id}`, { headers: { "User-Agent": UA } });
+  if (!r.ok) throw new Error(`MAL API error: ${r.status}`);
   const d = await r.json();
   return {
     title: d.data?.title || "",
     eng: d.data?.title_english || d.data?.title || "",
+    episodes: d.data?.episodes || 0,
   };
 }
 
-async function findMalId(title) {
+export async function findMalId(title: string): Promise<string | null> {
   const s = slugify(title);
-  const r = await fetch(`${BASE}${s}-episode-1/`, {
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
+  const r = await fetch(`${BASE}${s}-episode-1/`, { headers: { "User-Agent": UA } });
   if (!r.ok) return null;
   const h = await r.text();
   const m = h.match(/var malId\s*=\s*["'](\d+)/);
   return m ? m[1] : null;
 }
 
-async function ajaxDL(mid, ep) {
+export async function ajaxDL(mid: string, ep: number) {
   const r = await fetch(AJAX, {
     method: "POST",
     headers: {
-      "User-Agent": "Mozilla/5.0",
+      "User-Agent": UA,
       "X-Requested-With": "XMLHttpRequest",
       Origin: BASE,
       Referer: BASE,
@@ -49,27 +48,20 @@ async function ajaxDL(mid, ep) {
   return r.json();
 }
 
-function parseDL(html) {
-  const res = { sub: [], dub: [] };
-  const sectionRe =
-    /<div class="dl-section-header"><span class="dl-section-title">(.*?)<\/span>/g;
+export function parseDL(html: string) {
+  const res: { sub: { url: string; label: string }[]; dub: { url: string; label: string }[] } = { sub: [], dub: [] };
+  const sectionRe = /<div class="dl-section-header"><span class="dl-section-title">(.*?)<\/span>/g;
   let secMatch;
   while ((secMatch = sectionRe.exec(html)) !== null) {
     const secName = secMatch[1].trim().toUpperCase();
-    const rowRe = new RegExp(
-      secMatch[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
-        "[\\s\\S]*?<div class=\"dl-bubble-row\">([\\s\\S]*?)</div></div>"
-    );
+    const escaped = secMatch[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rowRe = new RegExp(escaped + '[\\s\\S]*?<div class="dl-bubble-row">([\\s\\S]*?)</div></div>');
     const rowMatch = html.match(rowRe);
     if (!rowMatch) continue;
-    const linkRe =
-      /<a href="([^"]+)"[^>]*class="dl-bubble-item"[\s\S]*?<span class="dl-bubble-text">(.*?)<\/span>/g;
+    const linkRe = /<a href="([^"]+)"[^>]*class="dl-bubble-item"[\s\S]*?<span class="dl-bubble-text">(.*?)<\/span>/g;
     let lm;
     while ((lm = linkRe.exec(rowMatch[1])) !== null) {
-      const entry = {
-        url: lm[1],
-        label: (lm[2] || "Default").replace(/<[^>]+>/g, "").trim(),
-      };
+      const entry = { url: lm[1], label: (lm[2] || "Default").replace(/<[^>]+>/g, "").trim() };
       if (secName === "SUBTITLED") res.sub.push(entry);
       else if (secName === "DUBBED") res.dub.push(entry);
     }
@@ -77,11 +69,9 @@ function parseDL(html) {
   return res;
 }
 
-async function getImg(name, ep) {
+export async function getImg(name: string, ep: number): Promise<string> {
   try {
-    const r = await fetch(`${BASE}${slugify(name)}-episode-${ep}/`, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
+    const r = await fetch(`${BASE}${slugify(name)}-episode-${ep}/`, { headers: { "User-Agent": UA } });
     if (!r.ok) return "";
     const h = await r.text();
     const m = h.match(/background-image:\s*url\('([^']+)'\)/);
@@ -91,14 +81,13 @@ async function getImg(name, ep) {
   }
 }
 
-function makeBtn(url, type, label, sub) {
+export function makeBtn(url: string, type: string, label: string, sub: string): string {
   const icon = type === "sub" ? "closed-captioning" : "microphone";
-  if (url)
-    return `<a href="${url}" target="_blank" class="dl-btn ${type}"><div class="dl-icon"><i class="fas fa-${icon}"></i></div><div class="dl-info"><span class="main-text">Download ${label}</span><span class="sub-text">${sub}</span></div><i class="fas fa-chevron-right dl-arrow"></i></a>`;
+  if (url) return `<a href="${url}" target="_blank" class="dl-btn ${type}"><div class="dl-icon"><i class="fas fa-${icon}"></i></div><div class="dl-info"><span class="main-text">Download ${label}</span><span class="sub-text">${sub}</span></div><i class="fas fa-chevron-right dl-arrow"></i></a>`;
   return `<div class="dl-btn ${type} disabled"><div class="dl-icon"><i class="fas fa-${icon}"></i></div><div class="dl-info"><span class="main-text">${label} Unavailable</span><span class="sub-text">Not available yet</span></div></div>`;
 }
 
-function renderPage(name, ep, img, subUrl, dubUrl) {
+export function renderPage(name: string, ep: number, img: string, subUrl: string, dubUrl: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -171,100 +160,15 @@ body{font-family:'Inter',sans-serif;min-height:100vh;background:#08080c;color:#f
 </html>`;
 }
 
-function jsonResp(data, status = 200) {
+export function jsonResp(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },
   });
 }
 
-function htmlResp(html) {
+export function htmlResp(html: string) {
   return new Response(html, {
     headers: { "Content-Type": "text/html;charset=UTF-8" },
   });
-}
-
-export async function onRequest(context) {
-  const url = new URL(context.request.url);
-  const path = url.pathname;
-
-  try {
-    // GET /api/page?title=...&episode=N&sub=URL&dub=URL
-    if (path === "/api/page") {
-      const title = url.searchParams.get("title");
-      const ep = url.searchParams.get("episode") || "1";
-      const sub = url.searchParams.get("sub") || "";
-      const dub = url.searchParams.get("dub") || "";
-      if (!title) return jsonResp({ error: "title required" }, 400);
-      const img = url.searchParams.get("image") || (await getImg(title, parseInt(ep)));
-      return htmlResp(renderPage(title, ep, img, sub, dub));
-    }
-
-    // GET /api/mal?mal_id=N&episode=N  (JSON)
-    if (path === "/api/mal" && url.searchParams.has("mal_id")) {
-      const mid = parseInt(url.searchParams.get("mal_id"));
-      const ep = parseInt(url.searchParams.get("episode") || "1");
-      if (!mid) return jsonResp({ error: "mal_id required" }, 400);
-      const info = await jikanInfo(mid);
-      const name = info.eng || info.title;
-      const imid = await findMalId(name);
-      if (!imid) return jsonResp({ error: "Anime not found on 9anime" }, 404);
-      const dl = await ajaxDL(imid, ep);
-      if (!dl?.data || dl.data.status !== 200)
-        return jsonResp({ error: "No download links" }, 404);
-      const dls = parseDL(dl.data.result || "");
-      return jsonResp({
-        anime: name,
-        episode: ep,
-        mal_id: imid,
-        downloads: { subtitled: dls.sub, dubbed: dls.dub },
-      });
-    }
-
-    // GET /api/mal/{id}/page?episode=N  (HTML landing page)
-    const pageMatch = path.match(/^\/api\/mal\/(\d+)\/page$/);
-    if (pageMatch) {
-      const mid = parseInt(pageMatch[1]);
-      const ep = parseInt(url.searchParams.get("episode") || "1");
-      const info = await jikanInfo(mid);
-      const name = info.eng || info.title;
-      const imid = await findMalId(name);
-      if (!imid) return jsonResp({ error: "Anime not found" }, 404);
-      const dl = await ajaxDL(imid, ep);
-      let subUrl = "";
-      let dubUrl = "";
-      if (dl?.data && dl.data.status === 200) {
-        const dls = parseDL(dl.data.result || "");
-        subUrl = dls.sub[0]?.url || "";
-        dubUrl = dls.dub[0]?.url || "";
-      }
-      const img = await getImg(name, ep);
-      return htmlResp(renderPage(name, ep, img, subUrl, dubUrl));
-    }
-
-    // GET /api/mal/{id}?episode=N  (JSON by path)
-    const jsonMatch = path.match(/^\/api\/mal\/(\d+)$/);
-    if (jsonMatch && !path.includes("/page")) {
-      const mid = parseInt(jsonMatch[1]);
-      const ep = parseInt(url.searchParams.get("episode") || "1");
-      const info = await jikanInfo(mid);
-      const name = info.eng || info.title;
-      const imid = await findMalId(name);
-      if (!imid) return jsonResp({ error: "Anime not found" }, 404);
-      const dl = await ajaxDL(imid, ep);
-      if (!dl?.data || dl.data.status !== 200)
-        return jsonResp({ error: "No links" }, 404);
-      const dls = parseDL(dl.data.result || "");
-      return jsonResp({
-        anime: name,
-        episode: ep,
-        mal_id: imid,
-        downloads: { subtitled: dls.sub, dubbed: dls.dub },
-      });
-    }
-
-    return jsonResp({ error: "Not found" }, 404);
-  } catch (e) {
-    return jsonResp({ error: e.message }, 500);
-  }
 }

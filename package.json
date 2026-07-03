@@ -1,0 +1,14 @@
+{
+  "name": "animezilla",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo done",
+    "deploy": "vercel deploy --prod"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.0",
+    "typescript": "^5.0.0"
+  }
+}
