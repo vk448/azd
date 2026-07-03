@@ -105,10 +105,79 @@ body{font-family:'Inter',sans-serif;min-height:100vh;background:#08080c;color:#f
 <div class="error-icon"><i class="fas fa-exclamation-triangle"></i></div>
 <h1 class="error-title">Oops! Something went wrong</h1>
 <p class="error-msg">${msg}</p>
-<a href="/" class="error-hint"><i class="fas fa-arrow-left"></i> Back to Home</a>
+<a href="https://animezilla.vercel.app" class="error-hint"><i class="fas fa-arrow-left"></i> Back to Website</a>
 </div>
 </div>
-<div class="footer">Powered by <a href="/">AnimeZilla</a></div>
+<div class="footer">Powered by <a href="https://animezilla.vercel.app">AnimeZilla</a></div>
+</body></html>`;
+}
+
+function renderUnavailable(name, ep, img) {
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${name} - Download Unavailable | AnimeZilla</title>
+<meta name="description" content="${name} Episode ${ep} download is currently unavailable">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;min-height:100vh;background:#08080c;color:#fff;overflow-x:hidden;-webkit-font-smoothing:antialiased;display:flex;align-items:center;justify-content:center}
+.bg-layer{position:fixed;inset:0;z-index:0}
+.bg-layer img{width:100%;height:100%;object-fit:cover;filter:blur(50px) brightness(0.15) saturate(1.4);transform:scale(1.4)}
+.bg-layer::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(8,8,12,0.15) 0%,rgba(8,8,12,0.6) 40%,rgba(8,8,12,0.92) 70%,#08080c 100%)}
+.bg-overlay{position:fixed;inset:0;z-index:1;background:radial-gradient(ellipse at 50% 40%,rgba(124,58,237,0.06) 0%,transparent 60%)}
+
+.card{position:relative;z-index:10;text-align:center;padding:48px 36px;max-width:400px;width:100%;animation:slideUp .6s ease-out}
+@keyframes slideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+
+.poster-wrap{position:relative;margin-bottom:28px;display:inline-block}
+.poster-glow{position:absolute;inset:-20px;background:radial-gradient(circle,rgba(239,68,68,0.15) 0%,transparent 70%);z-index:-1;filter:blur(25px);animation:glow 4s ease-in-out infinite alternate}
+@keyframes glow{from{opacity:0.5;transform:scale(0.95)}to{opacity:1;transform:scale(1.05)}}
+.poster{width:180px;height:254px;border-radius:20px;overflow:hidden;box-shadow:0 25px 70px rgba(0,0,0,0.7),0 0 0 1px rgba(255,255,255,0.06);position:relative}
+.poster img{width:100%;height:100%;object-fit:cover;filter:brightness(0.6) saturate(0.7)}
+.poster-overlay{position:absolute;inset:0;background:linear-gradient(180deg,transparent 30%,rgba(0,0,0,0.8) 100%);display:flex;align-items:center;justify-content:center}
+.unavailable-badge{background:rgba(239,68,68,0.9);color:#fff;font-size:11px;font-weight:800;padding:6px 14px;border-radius:8px;letter-spacing:1.5px;text-transform:uppercase;box-shadow:0 4px 20px rgba(239,68,68,0.4)}
+
+.title{font-size:24px;font-weight:800;margin-bottom:6px;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,0.6)}
+.ep-text{font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:24px}
+
+.unavailable-msg{display:flex;align-items:center;gap:10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);border-radius:14px;padding:16px 20px;margin-bottom:28px;animation:fadeIn .5s ease-out .2s both}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.unavailable-msg i{font-size:20px;color:#ef4444;flex-shrink:0}
+.unavailable-msg .msg-text{font-size:14px;font-weight:600;color:rgba(255,255,255,0.7);text-align:left;line-height:1.4}
+.unavailable-msg .msg-sub{font-size:12px;color:rgba(255,255,255,0.3);font-weight:400;margin-top:2px}
+
+.back-btn{display:inline-flex;align-items:center;gap:10px;background:linear-gradient(135deg,#7c3aed 0%,#9333ea 50%,#a855f7 100%);color:#fff;border:none;border-radius:14px;padding:16px 32px;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;transition:all .35s cubic-bezier(.4,0,.2,1);box-shadow:0 8px 30px rgba(124,58,237,0.35);animation:fadeIn .5s ease-out .3s both}
+.back-btn:hover{transform:translateY(-3px);box-shadow:0 14px 40px rgba(124,58,237,0.5)}
+.back-btn:active{transform:scale(0.97)}
+.back-btn i{font-size:14px;transition:transform .3s}
+.back-btn:hover i{transform:translateX(-3px)}
+
+.footer{position:fixed;bottom:0;left:0;right:0;z-index:10;text-align:center;padding:20px;font-size:11px;color:rgba(255,255,255,0.1)}
+.footer a{color:#7c3aed;text-decoration:none}
+</style></head><body>
+<div class="bg-layer"><img src="${img}" alt=""></div>
+<div class="bg-overlay"></div>
+<div class="card">
+<div class="poster-wrap">
+<div class="poster-glow"></div>
+<div class="poster">
+<img src="${img}" alt="${name}">
+<div class="poster-overlay"><span class="unavailable-badge">Unavailable</span></div>
+</div>
+</div>
+<h1 class="title">${name}</h1>
+<p class="ep-text">Episode ${ep}</p>
+<div class="unavailable-msg">
+<i class="fas fa-exclamation-circle"></i>
+<div>
+<div class="msg-text">Download Unavailable</div>
+<div class="msg-sub">This episode is not available yet. Check back later.</div>
+</div>
+</div>
+<a href="https://animezilla.vercel.app" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Website</a>
+</div>
+<div class="footer">Powered by <a href="https://animezilla.vercel.app">AnimeZilla</a></div>
 </body></html>`;
 }
 
@@ -230,6 +299,9 @@ module.exports = async (req, res) => {
         dubUrl = dls.dub[0]?.url || "";
       }
       const img = await getImg(name, ep);
+      if (!subUrl && !dubUrl) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderUnavailable(name, ep, img));
+      }
       const html = renderPage(name, ep, img, subUrl, dubUrl);
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
     }
@@ -263,6 +335,9 @@ module.exports = async (req, res) => {
         dubUrl = dls.dub[0]?.url || "";
       }
       const img = await getImg(title, ep);
+      if (!subUrl && !dubUrl) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderUnavailable(title, ep, img));
+      }
       const html = renderPage(title, ep, img, subUrl, dubUrl);
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
     }
