@@ -256,10 +256,13 @@ def scrape_episode_fast(mal_id: int, episode_no: int) -> dict:
     download_html = ajax_response["data"].get("result", "")
     downloads = parse_download_html(download_html)
 
+    landing_url = f"https://animezilla-download.pages.dev/api/mal/{mal_id}/page?episode={episode_no}"
+
     return {
         "anime": anime_name,
         "episode": episode_no,
         "mal_id": internal_mal_id,
+        "landing_page": landing_url,
         "downloads": downloads,
     }
 
