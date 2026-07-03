@@ -3,7 +3,7 @@ const AJAX = "https://9anime.org.lv/wp-admin/admin-ajax.php";
 const JIKAN = "https://api.jikan.moe/v4";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
-export function slugify(t: string): string {
+function slugify(t) {
   return t
     .toLowerCase()
     .replace(/[:'"()]/g, "")
@@ -13,7 +13,7 @@ export function slugify(t: string): string {
     .replace(/^-|-$/g, "");
 }
 
-export async function jikanInfo(id: number) {
+async function jikanInfo(id) {
   const r = await fetch(`${JIKAN}/anime/${id}`, { headers: { "User-Agent": UA } });
   if (!r.ok) throw new Error(`MAL API error: ${r.status}`);
   const d = await r.json();
@@ -24,7 +24,7 @@ export async function jikanInfo(id: number) {
   };
 }
 
-export async function findMalId(title: string): Promise<string | null> {
+async function findMalId(title) {
   const s = slugify(title);
   const r = await fetch(`${BASE}${s}-episode-1/`, { headers: { "User-Agent": UA } });
   if (!r.ok) return null;
@@ -33,7 +33,7 @@ export async function findMalId(title: string): Promise<string | null> {
   return m ? m[1] : null;
 }
 
-export async function ajaxDL(mid: string, ep: number) {
+async function ajaxDL(mid, ep) {
   const r = await fetch(AJAX, {
     method: "POST",
     headers: {
@@ -48,8 +48,8 @@ export async function ajaxDL(mid: string, ep: number) {
   return r.json();
 }
 
-export function parseDL(html: string) {
-  const res: { sub: { url: string; label: string }[]; dub: { url: string; label: string }[] } = { sub: [], dub: [] };
+function parseDL(html) {
+  const res = { sub: [], dub: [] };
   const sectionRe = /<div class="dl-section-header"><span class="dl-section-title">(.*?)<\/span>/g;
   let secMatch;
   while ((secMatch = sectionRe.exec(html)) !== null) {
@@ -69,7 +69,7 @@ export function parseDL(html: string) {
   return res;
 }
 
-export async function getImg(name: string, ep: number): Promise<string> {
+async function getImg(name, ep) {
   try {
     const r = await fetch(`${BASE}${slugify(name)}-episode-${ep}/`, { headers: { "User-Agent": UA } });
     if (!r.ok) return "";
@@ -81,13 +81,13 @@ export async function getImg(name: string, ep: number): Promise<string> {
   }
 }
 
-export function makeBtn(url: string, type: string, label: string, sub: string): string {
+function makeBtn(url, type, label, sub) {
   const icon = type === "sub" ? "closed-captioning" : "microphone";
   if (url) return `<a href="${url}" target="_blank" class="dl-btn ${type}"><div class="dl-icon"><i class="fas fa-${icon}"></i></div><div class="dl-info"><span class="main-text">Download ${label}</span><span class="sub-text">${sub}</span></div><i class="fas fa-chevron-right dl-arrow"></i></a>`;
   return `<div class="dl-btn ${type} disabled"><div class="dl-icon"><i class="fas fa-${icon}"></i></div><div class="dl-info"><span class="main-text">${label} Unavailable</span><span class="sub-text">Not available yet</span></div></div>`;
 }
 
-export function renderPage(name: string, ep: number, img: string, subUrl: string, dubUrl: string): string {
+function renderPage(name, ep, img, subUrl, dubUrl) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -160,15 +160,13 @@ body{font-family:'Inter',sans-serif;min-height:100vh;background:#08080c;color:#f
 </html>`;
 }
 
-export function jsonResp(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-export function htmlResp(html: string) {
-  return new Response(html, {
-    headers: { "Content-Type": "text/html;charset=UTF-8" },
-  });
-}
+module.exports = {
+  slugify,
+  jikanInfo,
+  findMalId,
+  ajaxDL,
+  parseDL,
+  getImg,
+  renderPage,
+  makeBtn,
+};

@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/**/*.ts",
+      "src": "api/**/*.js",
       "use": "@vercel/node"
     },
     {
@@ -11,10 +11,10 @@
     }
   ],
   "routes": [
-    { "src": "/api/mal/(\\d+)/page(.*)", "dest": "/api/mal/[id]/page.ts" },
-    { "src": "/api/mal/(\\d+)(.*)", "dest": "/api/mal/[id]/index.ts" },
-    { "src": "/api/page(.*)", "dest": "/api/page.ts" },
-    { "src": "/api(.*)", "dest": "/api/index.ts" },
+    { "src": "/api/mal/(\\d+)/page(.*)", "dest": "/api/mal/[id]/page.js" },
+    { "src": "/api/mal/(\\d+)(.*)", "dest": "/api/mal/[id]/index.js" },
+    { "src": "/api/page(.*)", "dest": "/api/page.js" },
+    { "src": "/api(.*)", "dest": "/api/index.js" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
