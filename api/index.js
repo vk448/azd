@@ -227,24 +227,15 @@ ${SHARED_BG}
 </body></html>`;
 }
 
-function renderSeason(name, img, totalEps, epData) {
-  const epRows = epData.map((e, i) => {
-    const hasSub = e.subUrl;
-    const hasDub = e.dubUrl;
-    const status = hasSub || hasDub ? "available" : "unavailable";
-    const badgeColor = status === "available" ? "linear-gradient(135deg,#22c55e,#16a34a)" : "rgba(255,255,255,0.08)";
-    const badgeText = status === "available" ? "Available" : "Soon";
-    const badgeTextColor = status === "available" ? "#fff" : "rgba(255,255,255,0.35)";
-    const links = [];
-    if (hasSub) links.push(`<a href="${e.subUrl}" target="_blank" class="ep-link sub-link">SUB</a>`);
-    if (hasDub) links.push(`<a href="${e.dubUrl}" target="_blank" class="ep-link dub-link">DUB</a>`);
-    if (!links.length) links.push(`<span class="ep-link disabled-link">N/A</span>`);
-    return `<div class="ep-row" style="animation-delay:${0.05 * i}s">
-<div class="ep-num"><span class="ep-num-text">${i + 1}</span></div>
-<div class="ep-info"><div class="ep-title">Episode ${i + 1}</div><div class="ep-status" style="color:${badgeTextColor}"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${badgeColor};margin-right:6px"></span>${badgeText}</div></div>
-<div class="ep-links">${links.join("")}</div>
-</div>`;
-  }).join("");
+function renderSeason(name, img, totalEps, mid) {
+  const epRows = [];
+  for (let i = 1; i <= totalEps; i++) {
+    epRows.push(`<a href="/api/mal/${mid}/page?episode=${i}" class="ep-row" style="animation-delay:${0.02 * i}s;text-decoration:none;color:inherit">
+<div class="ep-num"><span class="ep-num-text">${i}</span></div>
+<div class="ep-info"><div class="ep-title">Episode ${i}</div><div class="ep-status"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff6b35;margin-right:6px"></span>View Downloads</div></div>
+<div class="ep-links"><i class="fas fa-chevron-right" style="color:rgba(255,255,255,0.2);font-size:14px"></i></div>
+</a>`);
+  }
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -314,14 +305,12 @@ ${SHARED_BG}
 <div class="hero-meta">Full Season Download</div>
 <div class="hero-stats">
 <div class="stat"><span class="stat-num">${totalEps}</span><span class="stat-label">Episodes</span></div>
-<div class="stat"><span class="stat-num">${epData.filter(e => e.subUrl || e.dubUrl).length}</span><span class="stat-label">Available</span></div>
-<div class="stat"><span class="stat-num">${totalEps - epData.filter(e => e.subUrl || e.dubUrl).length}</span><span class="stat-label">Soon</span></div>
 </div>
 </div>
 </div>
 <div class="season-section">
 <div class="section-header"><span class="section-title">All Episodes</span><span class="section-badge">${totalEps} Total</span></div>
-<div class="ep-list">${epRows}</div>
+<div class="ep-list">${epRows.join("")}</div>
 </div>
 <div class="back-section"><a href="https://animezilla.vercel.app" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Website</a></div>
 </div>
@@ -348,21 +337,7 @@ module.exports = async (req, res) => {
       const imid = await findMalId(name);
       if (!imid) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
       const img = info.image || (await getImg(name, 1));
-      const epData = [];
-      for (let ep = 1; ep <= totalEps; ep++) {
-        let subUrl = "", dubUrl = "";
-        try {
-          const dl = await ajaxDL(imid, ep);
-          if (dl?.data && dl.data.status === 200) {
-            const dls = parseDL(dl.data.result || "");
-            subUrl = dls.sub[0]?.url || "";
-            dubUrl = dls.dub[0]?.url || "";
-          }
-        } catch {}
-        epData.push({ ep, subUrl, dubUrl });
-        if (ep < totalEps) await new Promise(r => setTimeout(r, 300));
-      }
-      const html = renderSeason(name, img, totalEps, epData);
+      const html = renderSeason(name, img, totalEps, imid);
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
     }
 
