@@ -36,7 +36,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(3000, () => {
   console.log("AnimeZilla local: http://localhost:3000");
-  console.log("  GET /api/mal/21/page?episode=1");
+  console.log("  GET /api/mal/21/page?episode=1   (single episode)");
+  console.log("  GET /api/mal/21/season            (full season)");
   console.log("  GET /api/page?title=One+Piece&episode=1");
-  console.log("  GET /api?mal_id=21&episode=1");
 });
