@@ -25,12 +25,29 @@ async function jikanInfo(id) {
   throw new Error(`MAL_API_ERROR`);
 }
 
+async function getEpCountFrom9Anime(title) {
+  try {
+    const r = await fetch(`${BASE}${slugify(title)}-episode-1/`, { headers: { "User-Agent": UA } });
+    if (!r.ok) return 0;
+    const h = await r.text();
+    const m = h.match(/EP_DATA\s*=\s*(\[[\s\S]*?\]);/);
+    if (m) {
+      const data = JSON.parse(m[1]);
+      return data.length;
+    }
+    return 0;
+  } catch { return 0; }
+}
+
 async function findMalId(title) {
   const r = await fetch(`${BASE}${slugify(title)}-episode-1/`, { headers: { "User-Agent": UA } });
-  if (!r.ok) return null;
+  if (!r.ok) return { malId: null, epCount: 0 };
   const h = await r.text();
   const m = h.match(/var malId\s*=\s*["'](\d+)/);
-  return m ? m[1] : null;
+  let epCount = 0;
+  const e = h.match(/EP_DATA\s*=\s*(\[[\s\S]*?\]);/);
+  if (e) { try { epCount = JSON.parse(e[1]).length; } catch {} }
+  return { malId: m ? m[1] : null, epCount };
 }
 
 async function ajaxDL(mid, ep) {
@@ -342,11 +359,11 @@ module.exports = async (req, res) => {
       let info;
       try { info = await jikanInfo(mid); } catch { return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_MSG)); }
       const name = info.eng || info.title;
-      const totalEps = info.episodes || 12;
-      const imid = await findMalId(name);
-      if (!imid) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
+      const found = await findMalId(name);
+      if (!found.malId) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
+      const totalEps = info.episodes || found.epCount || 12;
       const img = info.image || (await getImg(name, 1));
-      const html = renderSeason(name, img, totalEps, imid);
+      const html = renderSeason(name, img, totalEps, found.malId);
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
     }
 
@@ -357,10 +374,10 @@ module.exports = async (req, res) => {
       let info;
       try { info = await jikanInfo(mid); } catch { return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_MSG)); }
       const name = info.eng || info.title;
-      const imid = await findMalId(name);
-      if (!imid) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
+      const found = await findMalId(name);
+      if (!found.malId) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
       let subUrl = "", dubUrl = "";
-      const dl = await ajaxDL(imid, ep);
+      const dl = await ajaxDL(found.malId, ep);
       if (dl?.data && dl.data.status === 200) {
         const dls = parseDL(dl.data.result || "");
         subUrl = dls.sub[0]?.url || "";
@@ -381,22 +398,22 @@ module.exports = async (req, res) => {
       let info;
       try { info = await jikanInfo(mid); } catch { return res.status(400).json({ error: ERR_MSG }); }
       const name = info.eng || info.title;
-      const imid = await findMalId(name);
-      if (!imid) return res.status(404).json({ error: ERR_404 });
-      const dl = await ajaxDL(imid, ep);
+      const found = await findMalId(name);
+      if (!found.malId) return res.status(404).json({ error: ERR_404 });
+      const dl = await ajaxDL(found.malId, ep);
       if (!dl?.data || dl.data.status !== 200) return res.status(404).json({ error: "No download links available for this episode." });
       const dls = parseDL(dl.data.result || "");
-      return res.status(200).json({ anime: name, episode: ep, mal_id: imid, downloads: { subtitled: dls.sub, dubbed: dls.dub } });
+      return res.status(200).json({ anime: name, episode: ep, mal_id: found.malId, downloads: { subtitled: dls.sub, dubbed: dls.dub } });
     }
 
     if (path === "/api/page") {
       const title = url.searchParams.get("title");
       const ep = parseInt(url.searchParams.get("episode") || "1");
       if (!title) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError("Please provide a valid anime title."));
-      const imid = await findMalId(title);
-      if (!imid) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
+      const found = await findMalId(title);
+      if (!found.malId) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
       let subUrl = "", dubUrl = "";
-      const dl = await ajaxDL(imid, ep);
+      const dl = await ajaxDL(found.malId, ep);
       if (dl?.data && dl.data.status === 200) {
         const dls = parseDL(dl.data.result || "");
         subUrl = dls.sub[0]?.url || "";
@@ -417,12 +434,12 @@ module.exports = async (req, res) => {
       let info;
       try { info = await jikanInfo(mid); } catch { return res.status(400).json({ error: ERR_MSG }); }
       const name = info.eng || info.title;
-      const imid = await findMalId(name);
-      if (!imid) return res.status(404).json({ error: ERR_404 });
-      const dl = await ajaxDL(imid, ep);
+      const found = await findMalId(name);
+      if (!found.malId) return res.status(404).json({ error: ERR_404 });
+      const dl = await ajaxDL(found.malId, ep);
       if (!dl?.data || dl.data.status !== 200) return res.status(404).json({ error: "No download links available for this episode." });
       const dls = parseDL(dl.data.result || "");
-      return res.status(200).json({ anime: name, episode: ep, mal_id: imid, downloads: { subtitled: dls.sub, dubbed: dls.dub } });
+      return res.status(200).json({ anime: name, episode: ep, mal_id: found.malId, downloads: { subtitled: dls.sub, dubbed: dls.dub } });
     }
 
     return res.status(404).json({ error: "Not found" });
