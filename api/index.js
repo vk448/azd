@@ -9,11 +9,20 @@ function slugify(t) {
 }
 
 async function jikanInfo(id) {
-  const r = await fetch(`${JIKAN}/anime/${id}`, { headers: { "User-Agent": UA } });
-  if (!r.ok) throw new Error(`MAL_API_ERROR`);
-  const d = await r.json();
-  const a = d.data || {};
-  return { title: a.title || "", eng: a.title_english || a.title || "", episodes: a.episodes || 0, image: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || "" };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch(`${JIKAN}/anime/${id}`, { headers: { "User-Agent": UA } });
+    if (r.ok) {
+      const d = await r.json();
+      const a = d.data || {};
+      return { title: a.title || "", eng: a.title_english || a.title || "", episodes: a.episodes || 0, image: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || "" };
+    }
+    if (r.status === 429 || r.status >= 500) {
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`MAL_API_ERROR`);
+  }
+  throw new Error(`MAL_API_ERROR`);
 }
 
 async function findMalId(title) {
