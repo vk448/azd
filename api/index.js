@@ -296,7 +296,18 @@ ${SHARED_BG}
 
 .ep-list{display:flex;flex-direction:column;gap:8px}
 .ep-row{display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:14px;transition:all .3s;animation:su .4s ease-out both}
+.ep-row.hidden{display:none}
 .ep-row:hover{background:rgba(255,255,255,0.05);border-color:rgba(255,170,0,0.15);transform:translateX(4px)}
+.search-box{position:relative;margin-bottom:16px}
+.search-box input{width:100%;padding:14px 20px 14px 48px;border-radius:14px;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);color:#fff;font-size:14px;font-family:'Inter',sans-serif;font-weight:600;outline:none;transition:all .3s;backdrop-filter:blur(10px)}
+.search-box input::placeholder{color:rgba(255,255,255,0.25)}
+.search-box input:focus{border-color:rgba(255,106,53,0.4);background:rgba(255,255,255,0.05);box-shadow:0 0 20px rgba(255,106,53,0.1)}
+.search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:rgba(255,255,255,0.25);font-size:16px;pointer-events:none}
+.search-clear{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.3);width:26px;height:26px;border-radius:8px;cursor:pointer;font-size:12px;display:none;align-items:center;justify-content:center;transition:all .2s}
+.search-clear.show{display:flex}
+.search-clear:hover{background:rgba(255,60,47,0.2);color:#ff6b35}
+.no-results{display:none;text-align:center;padding:40px 20px;color:rgba(255,255,255,0.3);font-size:14px}
+.no-results i{font-size:32px;color:rgba(255,60,47,0.3);margin-bottom:12px;display:block}
 .ep-num{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(255,60,47,0.15),rgba(255,170,0,0.08));border:1px solid rgba(255,60,47,0.2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .ep-num-text{font-size:13px;font-weight:800;color:#ff6b35}
 .ep-info{flex:1;min-width:0}
@@ -336,12 +347,31 @@ ${SHARED_BG}
 </div>
 <div class="season-section">
 <div class="section-header"><span class="section-title">All Episodes</span><span class="section-badge">${totalEps} Total</span></div>
-<div class="ep-list">${epRows.join("")}</div>
+${totalEps > 30 ? `<div class="search-box"><i class="fas fa-search search-icon"></i><input type="text" id="epSearch" placeholder="Search episode number..." oninput="filterEps()"><button class="search-clear" id="clearBtn" onclick="document.getElementById('epSearch').value='';filterEps()"><i class="fas fa-times"></i></button></div>` : ""}
+<div class="ep-list" id="epList">${epRows.join("")}</div>
+<div class="no-results" id="noResults"><i class="fas fa-search"></i>No episodes found</div>
 </div>
 <div class="back-section"><a href="https://animezilla.vercel.app" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Website</a></div>
 </div>
 <div class="footer"><p>Powered by <a href="https://animezilla.vercel.app">AnimeZilla</a></p></div>
 </div>
+<script>
+function filterEps(){
+  var q=document.getElementById("epSearch").value.trim().toLowerCase();
+  var rows=document.querySelectorAll(".ep-row");
+  var vis=0;
+  rows.forEach(function(r){
+    var n=r.querySelector(".ep-num-text");
+    if(n){
+      var num=n.textContent.trim();
+      if(!q||num===q||num.indexOf(q)!==-1){r.classList.remove("hidden");vis++}
+      else{r.classList.add("hidden")}
+    }
+  });
+  document.getElementById("noResults").style.display=vis===0?"block":"none";
+  document.getElementById("clearBtn").classList.toggle("show",q.length>0);
+}
+</script>
 </body></html>`;
 }
 
