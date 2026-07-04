@@ -361,8 +361,19 @@ module.exports = async (req, res) => {
       const name = info.eng || info.title;
       const found = await findMalId(name);
       if (!found.malId) return res.setHeader("Content-Type","text/html;charset=UTF-8").send(renderError(ERR_404));
-      const totalEps = info.episodes || found.epCount || 12;
       const img = info.image || (await getImg(name, 1));
+      let hasAnyDl = false;
+      try {
+        const dl = await ajaxDL(found.malId, 1);
+        if (dl?.data && dl.data.status === 200) {
+          const dls = parseDL(dl.data.result || "");
+          if (dls.sub.length > 0 || dls.dub.length > 0) hasAnyDl = true;
+        }
+      } catch {}
+      if (!hasAnyDl) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderUnavailable(name, "all", img));
+      }
+      const totalEps = info.episodes || found.epCount || 12;
       const html = renderSeason(name, img, totalEps, found.malId);
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
     }
