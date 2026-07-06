@@ -1050,7 +1050,7 @@ function nodeFetch(url, headers, redirectCount) {
   if (redirectCount === undefined) redirectCount = 5;
   // Route through proxy if PROXY_BASE is set and target is a blocked host
   const u = new URL(url);
-  if (PROXY_BASE && (u.hostname.endsWith("anikage.cc") || u.hostname.endsWith("anizone.to") || u.hostname.endsWith("vivibebe.site") || u.hostname.endsWith("bibiemb.xyz") || u.hostname.endsWith("cdn.anizara.store"))) {
+  if (PROXY_BASE && (u.hostname.endsWith("anikage.cc") || u.hostname.endsWith("anizone.to"))) {
     return proxyFetch(url, headers, redirectCount);
   }
   return directFetch(url, headers, redirectCount);
@@ -1171,21 +1171,21 @@ async function anikageGetSources(anilistId, episode, server, type) {
   return await r.json();
 }
 
-function anikageParseM3u8(html) {
-  const m = html.match(/const src = "([^"]+)"/);
-  if (!m) throw new Error("No m3u8 URL in embed page");
-  return m[1];
-}
-
-async function anikageScrapeEmbed(embedUrl) {
-  const r = await nodeFetch(embedUrl, { "User-Agent": UA, "Referer": ANIKAGE_BASE + "/", "Accept": "text/html" });
-  if (!r.ok) throw new Error("Embed fetch failed: " + r.status);
-  return anikageParseM3u8(await r.text());
-}
-
 function anikageSubFromEmbedUrl(embedUrl) {
   if (!embedUrl) return null;
   try { return new URL(embedUrl).searchParams.get("sub"); } catch { return null; }
+}
+
+const AK_XOR_KEY = "aproxy2026";
+
+function anikageDecrypt(encoded) {
+  try {
+    const raw = atob(encoded);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) ^ AK_XOR_KEY.charCodeAt(i % AK_XOR_KEY.length);
+    const dec = new TextDecoder().decode(bytes);
+    return dec.split("\0")[0];
+  } catch { return null; }
 }
 
 async function anikageExtract(anilistId, episodeNum, audioType) {
@@ -1195,16 +1195,17 @@ async function anikageExtract(anilistId, episodeNum, audioType) {
   const serverId = preferred.id;
   const sources = await anikageGetSources(anilistId, episodeNum, serverId, audioType);
 
-  let m3u8 = null, fromScrape = false;
-  for (const emb of sources.embeds || []) {
-    if (emb.url && emb.url.includes(".m3u8")) { m3u8 = emb.url; break; }
-    if (!emb.url || emb.url.includes(".m3u8")) continue;
-    try { m3u8 = await anikageScrapeEmbed(emb.url); fromScrape = true; break; } catch {}
+  let m3u8 = null;
+  for (const src of sources.sources || []) {
+    const dec = anikageDecrypt(src.url);
+    if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
   }
   if (!m3u8) throw new Error("No accessible stream on AniKage");
 
   const tracks = (sources.subtitles || []).map(t => {
-    const subUrl = t.file && t.file.startsWith("http") ? t.file : anikageSubFromEmbedUrl(t.embedUrl);
+    let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+    if (!subUrl) subUrl = anikageDecrypt(t.file);
+    if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
     return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
   }).filter(t => t.file);
 
@@ -1217,7 +1218,7 @@ async function anikageExtract(anilistId, episodeNum, audioType) {
     embedOptions: sources.embedOptions || [],
     intro: sources.intro || null,
     outro: sources.outro || null,
-    fromScrape
+    fromScrape: false
   };
 }
 
@@ -2292,17 +2293,15 @@ module.exports = async (req, res) => {
         const sources = await anikageGetSources(aid, ep, server, audioType);
         let m3u8 = null;
         const results = [];
-        for (const emb of sources.embeds || []) {
-          if (emb.url && emb.url.includes(".m3u8")) { m3u8 = emb.url; results.push({ server: emb.server, url: emb.url, direct: true }); continue; }
-          try {
-            const url = await anikageScrapeEmbed(emb.url);
-            m3u8 = m3u8 || url;
-            results.push({ server: emb.server, embedUrl: emb.url, m3u8: url });
-          } catch { results.push({ server: emb.server, embedUrl: emb.url, error: "scrape failed" }); }
+        for (const src of sources.sources || []) {
+          const dec = anikageDecrypt(src.url);
+          if (dec && dec.includes(".m3u8")) { m3u8 = m3u8 || dec; results.push({ server: src.server || "HD-1", quality: src.quality, url: dec }); }
         }
         const tracks = (sources.subtitles || []).map(t => {
-          const file = t.file && t.file.startsWith("http") ? t.file : anikageSubFromEmbedUrl(t.embedUrl);
-          return { file: file || "", label: t.label || "English", kind: "captions", default: t.default || false };
+          let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+          if (!subUrl) subUrl = anikageDecrypt(t.file);
+          if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+          return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
         }).filter(t => t.file);
         return res.status(200).json({
           success: true, anilistId: aid, episode: ep, server, type: audioType,
