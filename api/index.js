@@ -1045,8 +1045,39 @@ async function extractMegaPlayByMal(malId, episode, type) {
 }
 
 // ====== AniZone Helpers ======
+function nodeFetch(url, headers, redirectCount) {
+  if (redirectCount === undefined) redirectCount = 5;
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === "https:" ? require("https") : require("http");
+    const opts = {
+      hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80),
+      path: u.pathname + u.search, method: "GET",
+      headers: { ...headers }, rejectUnauthorized: false,
+    };
+    const req = mod.request(opts, (res) => {
+      if ((res.statusCode === 301 || res.statusCode === 302) && redirectCount > 0) {
+        const location = res.headers.location;
+        if (location) {
+          const absUrl = location.startsWith("http") ? location : new URL(location, url).href;
+          resolve(nodeFetch(absUrl, headers, redirectCount - 1));
+          return;
+        }
+      }
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: () => data, json: () => JSON.parse(data) });
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(20000, () => { req.destroy(); reject(new Error("timeout")); });
+    req.end();
+  });
+}
+
 async function anizoneSearch(query) {
-  const r = await fetch(`${ANIZONE_BASE}/anime?search=${encodeURIComponent(query)}`, { headers: ANIZONE_HEADERS });
+  const r = await nodeFetch(`${ANIZONE_BASE}/anime?search=${encodeURIComponent(query)}`, ANIZONE_HEADERS);
   if (!r.ok) return [];
   const html = await r.text();
   const results = [];
@@ -1066,7 +1097,7 @@ async function anizoneSearch(query) {
 }
 
 async function anizoneFetchEpisode(slug, episode) {
-  const r = await fetch(`${ANIZONE_BASE}/anime/${slug}/${episode}`, { headers: ANIZONE_HEADERS });
+  const r = await nodeFetch(`${ANIZONE_BASE}/anime/${slug}/${episode}`, ANIZONE_HEADERS);
   if (!r.ok) throw new Error("AniZone episode fetch failed: " + r.status);
   return await r.text();
 }
@@ -1111,13 +1142,13 @@ async function anizoneExtract(title, episode) {
 
 // ====== AniKage Helpers ======
 async function anikageGetServers(anilistId, episode) {
-  const r = await fetch(`${ANIKAGE_BASE}/api/media/anime/${anilistId}/episodes/${episode}/servers`, { headers: ANIKAGE_HEADERS });
+  const r = await nodeFetch(`${ANIKAGE_BASE}/api/media/anime/${anilistId}/episodes/${episode}/servers`, ANIKAGE_HEADERS);
   if (!r.ok) throw new Error("AniKage servers fetch failed: " + r.status);
   return await r.json();
 }
 
 async function anikageGetSources(anilistId, episode, server, type) {
-  const r = await fetch(`${ANIKAGE_BASE}/api/media/anime/${anilistId}/episodes/${episode}/sources?server=${server}&type=${type}&provider=${server}`, { headers: ANIKAGE_HEADERS });
+  const r = await nodeFetch(`${ANIKAGE_BASE}/api/media/anime/${anilistId}/episodes/${episode}/sources?server=${server}&type=${type}&provider=${server}`, ANIKAGE_HEADERS);
   if (!r.ok) throw new Error("AniKage sources fetch failed: " + r.status);
   return await r.json();
 }
@@ -1129,7 +1160,7 @@ function anikageParseM3u8(html) {
 }
 
 async function anikageScrapeEmbed(embedUrl) {
-  const r = await fetch(embedUrl, { headers: { "User-Agent": UA, "Referer": ANIKAGE_BASE + "/", "Accept": "text/html" } });
+  const r = await nodeFetch(embedUrl, { "User-Agent": UA, "Referer": ANIKAGE_BASE + "/", "Accept": "text/html" });
   if (!r.ok) throw new Error("Embed fetch failed: " + r.status);
   return anikageParseM3u8(await r.text());
 }
