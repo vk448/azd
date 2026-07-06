@@ -1,8 +1,20 @@
 const BASE = "https://9anime.org.lv/";
 const AJAX = "https://9anime.org.lv/wp-admin/admin-ajax.php";
 const JIKAN = "https://api.jikan.moe/v4";
+const ANILIST = "https://graphql.anilist.co";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const { spawn } = require("child_process");
+
+async function anilistQuery(query, variables) {
+  const r = await fetch(ANILIST, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": UA },
+    body: JSON.stringify({ query, variables })
+  });
+  const d = await r.json();
+  if (d.errors) throw new Error(d.errors[0].message);
+  return d.data;
+}
 
 function slugify(t) {
   return t.toLowerCase().replace(/[:'"()]/g, "").replace(/[^a-z0-9\s-]/g, "")
@@ -2113,80 +2125,180 @@ module.exports = async (req, res) => {
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
     }
 
-    // Anime API (AniList-style): /api/anime/:mal_id
-    const animeApi = path.match(/^\/api\/anime\/(\d+)$/);
-    if (animeApi) {
-      const mid = parseInt(animeApi[1]);
-      const limit = Math.min(parseInt(url.searchParams.get("limit") || "25"), 50);
-      const dubType = url.searchParams.get("dub") === "true";
-      const getType = (idx) => dubType ? "dub" : "sub";
+    // ====== NEW ANILIST-BASED ENDPOINTS ======
 
+    // Helper: format AniList media to common JSON
+    function fmtMedia(m) {
+      if (!m) return null;
+      return {
+        id: m.id,
+        malId: m.idMal || null,
+        title: m.title?.romaji || m.title?.english || "",
+        titleEnglish: m.title?.english || "",
+        titleNative: m.title?.native || "",
+        image: m.coverImage?.extraLarge || m.coverImage?.large || "",
+        coverImage: m.coverImage?.extraLarge || "",
+        bannerImage: m.bannerImage || "",
+        description: (m.description || "").replace(/<[^>]+>/g, ""),
+        status: m.status || "",
+        format: m.format || "",
+        totalEpisodes: m.episodes || 0,
+        duration: m.duration || null,
+        season: m.season || "",
+        seasonYear: m.seasonYear || null,
+        score: m.averageScore || null,
+        popularity: m.popularity || null,
+        trending: m.trending || null,
+        favourites: m.favourites || null,
+        genres: m.genres || [],
+        studios: (m.studios?.nodes || []).map(s => s.name),
+        source: m.source || "",
+        country: m.countryOfOrigin || "",
+        startDate: m.startDate ? `${m.startDate.year}-${String(m.startDate.month||1).padStart(2,"0")}-${String(m.startDate.day||1).padStart(2,"0")}` : null,
+        endDate: m.endDate ? `${m.endDate.year}-${String(m.endDate.month||1).padStart(2,"0")}-${String(m.endDate.day||1).padStart(2,"0")}` : null,
+        nextAiringEpisode: m.nextAiringEpisode ? {
+          episode: m.nextAiringEpisode.episode,
+          airingAt: m.nextAiringEpisode.airingAt,
+          timeUntilAiring: m.nextAiringEpisode.timeUntilAiring
+        } : null,
+        trailer: m.trailer ? `https://www.youtube.com/watch?v=${m.trailer.id}` : null
+      };
+    }
+
+    // GET /api/trending
+    if (path === "/api/trending") {
+      const page = parseInt(url.searchParams.get("page") || "1");
+      const perPage = Math.min(parseInt(url.searchParams.get("perPage") || "20"), 50);
       try {
-        const rr = await fetch(`${JIKAN}/anime/${mid}`, { headers: { "User-Agent": UA } });
-        if (!rr.ok) return res.status(400).json({ error: "Invalid MAL ID" });
-        const jj = await rr.json();
-        const a = jj.data || {};
+        const d = await anilistQuery(
+          `query($p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(sort:TRENDING_DESC,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity trending genres studios{nodes{name}}}}}`,
+          { p: page, pp: perPage }
+        );
+        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && m.totalEpisodes > 0);
+        return res.status(200).json({
+          currentPage: page,
+          hasNextPage: d.Page.media.length === perPage,
+          results
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
 
-        let epCount = a.episodes || 0;
-        if (!epCount) {
-          try { const f = await findMalId(a.title || ""); epCount = f.epCount || 0; } catch {}
-        }
+    // GET /api/top-rated
+    if (path === "/api/top-rated") {
+      const page = parseInt(url.searchParams.get("page") || "1");
+      const perPage = Math.min(parseInt(url.searchParams.get("perPage") || "20"), 50);
+      const genreFilter = url.searchParams.get("genres") || "";
+      const genreArr = genreFilter ? genreFilter.split(",") : [];
+      try {
+        const d = await anilistQuery(
+          `query($p:Int,$pp:Int,$genres:[String]){Page(page:$p,perPage:$pp){media(sort:SCORE_DESC,type:ANIME,genre_in:$genres){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity genres studios{nodes{name}}}}}`,
+          { p: page, pp: perPage, genres: genreArr.length ? genreArr : undefined }
+        );
+        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && m.totalEpisodes > 0);
+        return res.status(200).json({
+          currentPage: page,
+          hasNextPage: d.Page.media.length === perPage,
+          results
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
 
-        const statusMap = { "Currently Airing": "RELEASING", "Finished Airing": "FINISHED", "Not yet aired": "NOT_YET_RELEASED" };
-        const maxEp = Math.min(epCount || limit, limit);
-        const episodes = [];
+    // GET /api/search?q=...
+    if (path === "/api/search") {
+      const q = url.searchParams.get("q") || url.searchParams.get("query") || "";
+      if (!q) return res.status(400).json({ error: "Missing search query" });
+      const page = parseInt(url.searchParams.get("page") || "1");
+      const perPage = Math.min(parseInt(url.searchParams.get("perPage") || "20"), 50);
+      try {
+        const d = await anilistQuery(
+          `query($q:String,$p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(search:$q,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity genres}}}`,
+          { q, p: page, pp: perPage }
+        );
+        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && m.totalEpisodes > 0);
+        return res.status(200).json({
+          currentPage: page,
+          hasNextPage: d.Page.media.length === perPage,
+          query: q,
+          results
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
 
-        async function extractBatch(eps) {
-          const results = await Promise.allSettled(eps.map(ep =>
-            extractMegaPlayByMal(mid, ep, getType(ep)).catch(() => null)
-          ));
-          return results.map((r, i) => {
-            if (r.status === "fulfilled" && r.value && r.value.m3u8) {
-              return { number: eps[i], m3u8: r.value.m3u8, intro: r.value.intro, outro: r.value.outro };
-            }
-            return null;
-          }).filter(Boolean);
-        }
+    // GET /api/anime/:anilist_id  (AniList-based anime info)
+    const animeMatch = path.match(/^\/api\/anime\/(\d+)$/);
+    if (animeMatch) {
+      const aid = parseInt(animeMatch[1]);
+      try {
+        const d = await anilistQuery(
+          `query($id:Int){Media(id:$id,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage description(asHtml:false)status episodes duration season seasonYear averageScore meanScore popularity trending favourites genres studios{nodes{name}}type format source countryOfOrigin startDate{year month day}endDate{year month day}nextAiringEpisode{airingAt timeUntilAiring episode}trailer{site thumbnail}}}`,
+          { id: aid }
+        );
+        const media = d.Media;
+        if (!media) return res.status(404).json({ error: "Anime not found" });
+        return res.status(200).json(fmtMedia(media));
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
 
-        for (let i = 1; i <= maxEp; i += 5) {
-          const batch = [];
-          for (let e = i; e < i + 5 && e <= maxEp; e++) batch.push(e);
-          const results = await extractBatch(batch);
-          episodes.push(...results);
-        }
+    // GET /api/anime-embed/:anilist_id/episode/:num
+    const aniEmbedMatch = path.match(/^\/api\/anime-embed\/(\d+)\/episode\/(\d+)$/);
+    if (aniEmbedMatch) {
+      const aid = parseInt(aniEmbedMatch[1]);
+      const epNum = parseInt(aniEmbedMatch[2]);
+      const type = url.searchParams.get("type") || "sub";
+      try {
+        // Get MAL ID from AniList
+        const d = await anilistQuery(
+          `query($id:Int){Media(id:$id,type:ANIME){id idMal title{romaji english}}}`,
+          { id: aid }
+        );
+        if (!d.Media) return res.status(404).json({ error: "Anime not found" });
+        const malId = d.Media.idMal;
+        const title = d.Media.title?.romaji || d.Media.title?.english || "Unknown";
+        if (!malId) return res.status(400).json({ error: "No MAL ID mapping found" });
+
+        // Extract from MegaPlay
+        const result = await extractMegaPlayByMal(malId, epNum, type === "dub" ? "dub" : "sub");
+        if (!result || !result.m3u8) return res.status(404).json({ error: "Episode not available" });
+
+        const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
+        m3u8Store.set(hash, { url: result.m3u8 });
+        const embedHash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+        hashStore.set(embedHash, {
+          m3u8: result.m3u8,
+          tracks: result.tracks || [],
+          title: title,
+          intro: result.intro || null,
+          outro: result.outro || null,
+          malId,
+          epNum,
+          type: type === "dub" ? "dub" : "sub"
+        });
 
         return res.status(200).json({
-          id: mid,
-          title: a.title || "",
-          titleEnglish: a.title_english || "",
-          titleJapanese: a.title_japanese || "",
-          synopsis: a.synopsis || "",
-          image: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || "",
-          coverImage: a.images?.webp?.large_image_url || a.trailer?.images?.maximum_image_url || "",
-          bannerImage: a.trailer?.images?.maximum_image_url || "",
-          genres: (a.genres || []).map(g => g.name),
-          status: statusMap[a.status] || a.status || "",
-          format: a.type || "",
-          totalEpisodes: epCount,
-          season: a.season || "",
-          seasonYear: a.year || 0,
-          duration: a.duration || "",
-          studios: (a.studios || []).map(s => s.name),
-          score: a.score || null,
-          scoredBy: a.scored_by || null,
-          rank: a.rank || null,
-          popularity: a.popularity || null,
-          source: a.source || "",
-          rating: a.rating || "",
-          airing: a.airing || false,
-          airedFrom: a.aired?.from || null,
-          airedTo: a.aired?.to || null,
-          nextEpisode: a.airing && epCount ? {
-            number: epCount + 1,
-            airingAt: null,
-            timeUntilAiring: null
-          } : null,
-          episodes
+          success: true,
+          anilistId: aid,
+          malId,
+          title,
+          episode: epNum,
+          type: type === "dub" ? "dub" : "sub",
+          hash,
+          embedUrl: `/api/watch-embed/${embedHash}`,
+          m3u8: result.m3u8,
+          intro: result.intro || null,
+          outro: result.outro || null,
+          tracks: (result.tracks || []).filter(t => t.kind === "captions").map(t => ({
+            file: t.file,
+            label: t.label || "English",
+            default: t.default || false
+          }))
         });
       } catch (e) {
         return res.status(500).json({ error: e.message });
