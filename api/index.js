@@ -2130,6 +2130,11 @@ module.exports = async (req, res) => {
     // Helper: format AniList media to common JSON
     function fmtMedia(m) {
       if (!m) return null;
+      const eps = m.episodes || (m.nextAiringEpisode ? m.nextAiringEpisode.episode - 1 : 0);
+      function fmtDate(d) {
+        if (!d || !d.year) return null;
+        return `${d.year}-${String(d.month||1).padStart(2,"0")}-${String(d.day||1).padStart(2,"0")}`;
+      }
       return {
         id: m.id,
         malId: m.idMal || null,
@@ -2142,7 +2147,7 @@ module.exports = async (req, res) => {
         description: (m.description || "").replace(/<[^>]+>/g, ""),
         status: m.status || "",
         format: m.format || "",
-        totalEpisodes: m.episodes || 0,
+        totalEpisodes: eps,
         duration: m.duration || null,
         season: m.season || "",
         seasonYear: m.seasonYear || null,
@@ -2154,8 +2159,8 @@ module.exports = async (req, res) => {
         studios: (m.studios?.nodes || []).map(s => s.name),
         source: m.source || "",
         country: m.countryOfOrigin || "",
-        startDate: m.startDate ? `${m.startDate.year}-${String(m.startDate.month||1).padStart(2,"0")}-${String(m.startDate.day||1).padStart(2,"0")}` : null,
-        endDate: m.endDate ? `${m.endDate.year}-${String(m.endDate.month||1).padStart(2,"0")}-${String(m.endDate.day||1).padStart(2,"0")}` : null,
+        startDate: fmtDate(m.startDate),
+        endDate: fmtDate(m.endDate),
         nextAiringEpisode: m.nextAiringEpisode ? {
           episode: m.nextAiringEpisode.episode,
           airingAt: m.nextAiringEpisode.airingAt,
@@ -2171,10 +2176,10 @@ module.exports = async (req, res) => {
       const perPage = Math.min(parseInt(url.searchParams.get("perPage") || "20"), 50);
       try {
         const d = await anilistQuery(
-          `query($p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(sort:TRENDING_DESC,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity trending genres studios{nodes{name}}}}}`,
+          `query($p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(sort:TRENDING_DESC,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity trending genres studios{nodes{name}}nextAiringEpisode{episode}}}}`,
           { p: page, pp: perPage }
         );
-        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && m.totalEpisodes > 0);
+        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && (m.totalEpisodes > 0 || m.status === "RELEASING" || m.status === "NOT_YET_RELEASED"));
         return res.status(200).json({
           currentPage: page,
           hasNextPage: d.Page.media.length === perPage,
@@ -2193,10 +2198,10 @@ module.exports = async (req, res) => {
       const genreArr = genreFilter ? genreFilter.split(",") : [];
       try {
         const d = await anilistQuery(
-          `query($p:Int,$pp:Int,$genres:[String]){Page(page:$p,perPage:$pp){media(sort:SCORE_DESC,type:ANIME,genre_in:$genres){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity genres studios{nodes{name}}}}}`,
+          `query($p:Int,$pp:Int,$genres:[String]){Page(page:$p,perPage:$pp){media(sort:SCORE_DESC,type:ANIME,genre_in:$genres){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity genres studios{nodes{name}}nextAiringEpisode{episode}}}}`,
           { p: page, pp: perPage, genres: genreArr.length ? genreArr : undefined }
         );
-        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && m.totalEpisodes > 0);
+        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && (m.totalEpisodes > 0 || m.status === "RELEASING" || m.status === "NOT_YET_RELEASED"));
         return res.status(200).json({
           currentPage: page,
           hasNextPage: d.Page.media.length === perPage,
@@ -2215,10 +2220,10 @@ module.exports = async (req, res) => {
       const perPage = Math.min(parseInt(url.searchParams.get("perPage") || "20"), 50);
       try {
         const d = await anilistQuery(
-          `query($q:String,$p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(search:$q,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity genres}}}`,
+          `query($q:String,$p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(search:$q,type:ANIME){id idMal title{romaji english native}coverImage{large extraLarge}bannerImage status episodes format averageScore popularity genres nextAiringEpisode{episode}}}}`,
           { q, p: page, pp: perPage }
         );
-        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && m.totalEpisodes > 0);
+        const results = d.Page.media.map(fmtMedia).filter(m => m.malId && (m.totalEpisodes > 0 || m.status === "RELEASING" || m.status === "NOT_YET_RELEASED"));
         return res.status(200).json({
           currentPage: page,
           hasNextPage: d.Page.media.length === perPage,
