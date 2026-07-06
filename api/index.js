@@ -996,9 +996,11 @@ async function extractMegaPlayByMal(malId, episode, type) {
 function renderEmbedOnly(m3u8Url, tracks, title, intro, outro) {
   const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
   m3u8Store.set(hash, { url: m3u8Url });
-  const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t =>
-    `<track kind="captions" src="/api/mpxy?url=${encodeURIComponent(t.file)}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`
-  ).join("\n");
+  const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t => {
+    const th = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+    m3u8Store.set(th, { url: t.file });
+    return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
+  }).join("\n");
   const introJSON = intro ? JSON.stringify(intro) : "null";
   const outroJSON = outro ? JSON.stringify(outro) : "null";
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
@@ -1232,9 +1234,11 @@ function fTime(s){if(!s||isNaN(s))return'0:00';var m=Math.floor(s/60);var sec=Ma
 function renderMegaPlayer(m3u8Url, tracks, title, intro, outro, malId, epNum) {
   const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
   m3u8Store.set(hash, { url: m3u8Url });
-  const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t =>
-    `<track kind="captions" src="/api/mpxy?url=${encodeURIComponent(t.file)}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`
-  ).join("\n");
+  const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t => {
+    const th = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+    m3u8Store.set(th, { url: t.file });
+    return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
+  }).join("\n");
   const titleClean = title ? title.replace(/[-\s]*EP\d+/i, "").trim() : "Anime";
   const introJSON = intro ? JSON.stringify(intro) : "null";
   const outroJSON = outro ? JSON.stringify(outro) : "null";
@@ -1573,11 +1577,22 @@ module.exports = async (req, res) => {
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
           const body = await r.text();
           const base = targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
+          function absUrl(p, t, b) { return p.startsWith("http") ? p : (p.startsWith("/") ? new URL(t).origin + p : b + p); }
           const rewritten = body.replace(/^(?!#)([^\s].+)$/gm, (line) => {
-            const abs = line.startsWith("http") ? line : (line.startsWith("/") ? new URL(targetUrl).origin + line : base + line);
+            const abs = absUrl(line, targetUrl, base);
+            if (abs.includes(".m3u8")) {
+              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              m3u8Store.set(h, { url: abs });
+              return "/api/mpxs/" + h;
+            }
             return "/api/mpxy?url=" + encodeURIComponent(abs);
           }).replace(/URI="([^"]+)"/g, (match, uri) => {
-            const abs = uri.startsWith("http") ? uri : (uri.startsWith("/") ? new URL(targetUrl).origin + uri : base + uri);
+            const abs = absUrl(uri, targetUrl, base);
+            if (abs.includes(".m3u8")) {
+              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              m3u8Store.set(h, { url: abs });
+              return 'URI="/api/mpxs/' + h + '"';
+            }
             return 'URI="/api/mpxy?url=' + encodeURIComponent(abs) + '"';
           });
           res.setHeader("Content-Type", "application/x-mpegURL");
@@ -1608,11 +1623,22 @@ module.exports = async (req, res) => {
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
           const body = await r.text();
           const base = targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
+          function absUrl(p, t, b) { return p.startsWith("http") ? p : (p.startsWith("/") ? new URL(t).origin + p : b + p); }
           const rewritten = body.replace(/^(?!#)([^\s].+)$/gm, (line) => {
-            const abs = line.startsWith("http") ? line : (line.startsWith("/") ? new URL(targetUrl).origin + line : base + line);
+            const abs = absUrl(line, targetUrl, base);
+            if (abs.includes(".m3u8")) {
+              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              m3u8Store.set(h, { url: abs });
+              return "/api/mpxs/" + h;
+            }
             return "/api/mpxy?url=" + encodeURIComponent(abs);
           }).replace(/URI="([^"]+)"/g, (match, uri) => {
-            const abs = uri.startsWith("http") ? uri : (uri.startsWith("/") ? new URL(targetUrl).origin + uri : base + uri);
+            const abs = absUrl(uri, targetUrl, base);
+            if (abs.includes(".m3u8")) {
+              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              m3u8Store.set(h, { url: abs });
+              return 'URI="/api/mpxs/' + h + '"';
+            }
             return 'URI="/api/mpxy?url=' + encodeURIComponent(abs) + '"';
           });
           res.setHeader("Content-Type", "application/x-mpegURL");
@@ -2085,6 +2111,86 @@ module.exports = async (req, res) => {
       const { m3u8, tracks, title, intro, outro, malId, epNum, type } = data;
       const html = renderEmbedOnly(m3u8, tracks, title + " [" + type.toUpperCase() + "] EP" + epNum, intro, outro);
       return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
+    }
+
+    // Anime API (AniList-style): /api/anime/:mal_id
+    const animeApi = path.match(/^\/api\/anime\/(\d+)$/);
+    if (animeApi) {
+      const mid = parseInt(animeApi[1]);
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "25"), 50);
+      const dubType = url.searchParams.get("dub") === "true";
+      const getType = (idx) => dubType ? "dub" : "sub";
+
+      try {
+        const rr = await fetch(`${JIKAN}/anime/${mid}`, { headers: { "User-Agent": UA } });
+        if (!rr.ok) return res.status(400).json({ error: "Invalid MAL ID" });
+        const jj = await rr.json();
+        const a = jj.data || {};
+
+        let epCount = a.episodes || 0;
+        if (!epCount) {
+          try { const f = await findMalId(a.title || ""); epCount = f.epCount || 0; } catch {}
+        }
+
+        const statusMap = { "Currently Airing": "RELEASING", "Finished Airing": "FINISHED", "Not yet aired": "NOT_YET_RELEASED" };
+        const maxEp = Math.min(epCount || limit, limit);
+        const episodes = [];
+
+        async function extractBatch(eps) {
+          const results = await Promise.allSettled(eps.map(ep =>
+            extractMegaPlayByMal(mid, ep, getType(ep)).catch(() => null)
+          ));
+          return results.map((r, i) => {
+            if (r.status === "fulfilled" && r.value && r.value.m3u8) {
+              return { number: eps[i], m3u8: r.value.m3u8, intro: r.value.intro, outro: r.value.outro };
+            }
+            return null;
+          }).filter(Boolean);
+        }
+
+        for (let i = 1; i <= maxEp; i += 5) {
+          const batch = [];
+          for (let e = i; e < i + 5 && e <= maxEp; e++) batch.push(e);
+          const results = await extractBatch(batch);
+          episodes.push(...results);
+        }
+
+        return res.status(200).json({
+          id: mid,
+          title: a.title || "",
+          titleEnglish: a.title_english || "",
+          titleJapanese: a.title_japanese || "",
+          synopsis: a.synopsis || "",
+          image: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || "",
+          coverImage: a.images?.webp?.large_image_url || a.trailer?.images?.maximum_image_url || "",
+          bannerImage: a.trailer?.images?.maximum_image_url || "",
+          genres: (a.genres || []).map(g => g.name),
+          status: statusMap[a.status] || a.status || "",
+          format: a.type || "",
+          totalEpisodes: epCount,
+          season: a.season || "",
+          seasonYear: a.year || 0,
+          duration: a.duration || "",
+          studios: (a.studios || []).map(s => s.name),
+          score: a.score || null,
+          scoredBy: a.scored_by || null,
+          rank: a.rank || null,
+          popularity: a.popularity || null,
+          source: a.source || "",
+          rating: a.rating || "",
+          airing: a.airing || false,
+          airedFrom: a.aired?.from || null,
+          airedTo: a.aired?.to || null,
+          nextEpisode: a.airing && epCount ? {
+            number: epCount + 1,
+            airingAt: null,
+            timeUntilAiring: null
+          } : null,
+          episodes
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
     }
 
     return res.status(404).json({ error: "Not found" });
