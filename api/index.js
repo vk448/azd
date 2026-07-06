@@ -5,6 +5,18 @@ const ANILIST = "https://graphql.anilist.co";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const { spawn } = require("child_process");
 
+function stableHash(...parts) {
+  let h = 0;
+  for (const p of parts) {
+    const s = String(p);
+    for (let i = 0; i < s.length; i++) {
+      h = ((h << 5) - h) + s.charCodeAt(i);
+      h |= 0;
+    }
+  }
+  return (h >>> 0).toString(36);
+}
+
 async function anilistQuery(query, variables) {
   const r = await fetch(ANILIST, {
     method: "POST",
@@ -940,8 +952,10 @@ async function getToonVideo(trembedUrl) {
 
 const ANIKOTO_API = "https://anikotoapi.site";
 const MEGAPLAY_BASE = "https://megaplay.buzz";
+
 const hashStore = new Map();
 const m3u8Store = new Map();
+const akLookup = new Map();
 const MEGAPLAY_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Referer": "https://megaplay.buzz/",
@@ -950,6 +964,21 @@ const MEGAPLAY_HEADERS = {
   "Sec-Fetch-Site": "cross-site",
   "Sec-Fetch-Mode": "cors",
   "Sec-Fetch-Dest": "empty"
+};
+const ANIZONE_BASE = "https://anizone.to";
+const ANIZONE_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Referer": "https://anizone.to/",
+  "Origin": "https://anizone.to",
+  "Accept": "text/html,application/xhtml+xml",
+  "Accept-Language": "en-US,en;q=0.9"
+};
+const ANIKAGE_BASE = "https://anikage.cc";
+const ANIKAGE_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Referer": "https://anikage.cc/",
+  "Origin": "https://anikage.cc",
+  "Accept": "application/json, text/plain, */*"
 };
 
 async function anikotoSearchByMal(malId) {
@@ -1005,11 +1034,139 @@ async function extractMegaPlayByMal(malId, episode, type) {
   return { ...await megaplayGetM3u8(streamUrl), streamUrl };
 }
 
-function renderEmbedOnly(m3u8Url, tracks, title, intro, outro) {
-  const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
-  m3u8Store.set(hash, { url: m3u8Url });
-  const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t => {
-    const th = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+// ====== AniZone Helpers ======
+async function anizoneSearch(query) {
+  const r = await fetch(`${ANIZONE_BASE}/anime?search=${encodeURIComponent(query)}`, { headers: ANIZONE_HEADERS });
+  if (!r.ok) return [];
+  const html = await r.text();
+  const results = [];
+  const cardRegex = /anmTitles:\s*JSON\.parse\('([^']+)'\)[\s\S]*?href="https:\/\/anizone\.to\/anime\/([a-z0-9]{8})/g;
+  let match;
+  while ((match = cardRegex.exec(html)) !== null) {
+    try {
+      const titles = JSON.parse(match[1].replace(/\\u0022/g, '"').replace(/\\u005C/g, '\\'));
+      const slug = match[2];
+      const engTitle = titles["1"] || titles["2"] || Object.values(titles)[0] || "";
+      if (engTitle && !results.find(r => r.slug === slug)) {
+        results.push({ slug, title: engTitle, nativeTitle: titles["8"] || "" });
+      }
+    } catch {}
+  }
+  return results;
+}
+
+async function anizoneFetchEpisode(slug, episode) {
+  const r = await fetch(`${ANIZONE_BASE}/anime/${slug}/${episode}`, { headers: ANIZONE_HEADERS });
+  if (!r.ok) throw new Error("AniZone episode fetch failed: " + r.status);
+  return await r.text();
+}
+
+function anizoneParseEpisode(html, slug, episode) {
+  const m3u8Match = html.match(/<media-player[^>]+src="(https:\/\/[^"]+\.m3u8)"/i);
+  if (!m3u8Match) throw new Error("No m3u8 URL found on AniZone page");
+  const videoUrl = m3u8Match[1];
+  const tracks = [];
+  const trackRegex = /<track\s+src=(https:\/\/[^\s>]+(?:\.(?:vtt|ass))?)[^>]*label="([^"]*)"[^>]*srclang="([^"]*)"[^>]*(?:default)?/gi;
+  let tMatch;
+  while ((tMatch = trackRegex.exec(html)) !== null) {
+    tracks.push({
+      file: tMatch[1].trim(),
+      label: tMatch[2].trim(),
+      srclang: tMatch[3].trim(),
+      kind: "subtitles",
+      default: tMatch[0].includes("default")
+    });
+  }
+  const titleMatch = html.match(/window\.getTitle\([^,]+,\s*'([^']+)'\)/);
+  const title = titleMatch ? titleMatch[1] : `Anime ${slug}`;
+  return { videoUrl, tracks, title, slug, episode };
+}
+
+async function anizoneSearchByTitle(title) {
+  const results = await anizoneSearch(title);
+  if (!results.length) return null;
+  const q = title.toLowerCase().trim();
+  let best = results.find(r => r.title.toLowerCase() === q);
+  if (!best) best = results.find(r => r.title.toLowerCase().includes(q) || q.includes(r.title.toLowerCase()));
+  if (!best) best = results[0];
+  return best;
+}
+
+async function anizoneExtract(title, episode) {
+  const found = await anizoneSearchByTitle(title);
+  if (!found) throw new Error("Anime not found on AniZone");
+  const html = await anizoneFetchEpisode(found.slug, episode);
+  return anizoneParseEpisode(html, found.slug, episode);
+}
+
+// ====== AniKage Helpers ======
+async function anikageGetServers(anilistId, episode) {
+  const r = await fetch(`${ANIKAGE_BASE}/api/media/anime/${anilistId}/episodes/${episode}/servers`, { headers: ANIKAGE_HEADERS });
+  if (!r.ok) throw new Error("AniKage servers fetch failed: " + r.status);
+  return await r.json();
+}
+
+async function anikageGetSources(anilistId, episode, server, type) {
+  const r = await fetch(`${ANIKAGE_BASE}/api/media/anime/${anilistId}/episodes/${episode}/sources?server=${server}&type=${type}&provider=${server}`, { headers: ANIKAGE_HEADERS });
+  if (!r.ok) throw new Error("AniKage sources fetch failed: " + r.status);
+  return await r.json();
+}
+
+function anikageParseM3u8(html) {
+  const m = html.match(/const src = "([^"]+)"/);
+  if (!m) throw new Error("No m3u8 URL in embed page");
+  return m[1];
+}
+
+async function anikageScrapeEmbed(embedUrl) {
+  const r = await fetch(embedUrl, { headers: { "User-Agent": UA, "Referer": ANIKAGE_BASE + "/", "Accept": "text/html" } });
+  if (!r.ok) throw new Error("Embed fetch failed: " + r.status);
+  return anikageParseM3u8(await r.text());
+}
+
+function anikageSubFromEmbedUrl(embedUrl) {
+  if (!embedUrl) return null;
+  try { return new URL(embedUrl).searchParams.get("sub"); } catch { return null; }
+}
+
+async function anikageExtract(anilistId, episodeNum, audioType) {
+  const serversData = await anikageGetServers(anilistId, episodeNum);
+  const preferred = serversData.servers.find(s => s.id === "neko" || s.default) || serversData.servers[0];
+  if (!preferred) throw new Error("No servers available on AniKage");
+  const serverId = preferred.id;
+  const sources = await anikageGetSources(anilistId, episodeNum, serverId, audioType);
+
+  let m3u8 = null, fromScrape = false;
+  for (const emb of sources.embeds || []) {
+    if (emb.url && emb.url.includes(".m3u8")) { m3u8 = emb.url; break; }
+    if (!emb.url || emb.url.includes(".m3u8")) continue;
+    try { m3u8 = await anikageScrapeEmbed(emb.url); fromScrape = true; break; } catch {}
+  }
+  if (!m3u8) throw new Error("No accessible stream on AniKage");
+
+  const tracks = (sources.subtitles || []).map(t => {
+    const subUrl = t.file && t.file.startsWith("http") ? t.file : anikageSubFromEmbedUrl(t.embedUrl);
+    return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
+  }).filter(t => t.file);
+
+  return {
+    videoUrl: m3u8,
+    tracks,
+    server: serverId,
+    servers: serversData.servers || [],
+    embeds: sources.embeds || [],
+    embedOptions: sources.embedOptions || [],
+    intro: sources.intro || null,
+    outro: sources.outro || null,
+    fromScrape
+  };
+}
+
+function renderEmbedOnly(m3u8Url, tracks, title, intro, outro, existingHash) {
+  const hash = existingHash || stableHash("eo", m3u8Url);
+  if (!existingHash) m3u8Store.set(hash, { url: m3u8Url });
+  const trackTags = (tracks || []).filter(t => t.kind === "captions" || t.kind === "subtitles").map(t => {
+    const th = stableHash("tr", t.file);
     m3u8Store.set(th, { url: t.file });
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
@@ -1244,10 +1401,10 @@ function fTime(s){if(!s||isNaN(s))return'0:00';var m=Math.floor(s/60);var sec=Ma
 </script></body></html>`;
 }
 function renderMegaPlayer(m3u8Url, tracks, title, intro, outro, malId, epNum) {
-  const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
+  const hash = stableHash("mp", m3u8Url);
   m3u8Store.set(hash, { url: m3u8Url });
   const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t => {
-    const th = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+    const th = stableHash("tr", t.file);
     m3u8Store.set(th, { url: t.file });
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
@@ -1582,8 +1739,10 @@ module.exports = async (req, res) => {
       const entry = m3u8Store.get(hash);
       if (!entry) return res.status(404).json({ error: "Invalid or expired token" });
       const targetUrl = entry.url;
+      const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
+      const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
-        const r = await fetch(targetUrl, { headers: MEGAPLAY_HEADERS, redirect: "follow" });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
@@ -1593,7 +1752,7 @@ module.exports = async (req, res) => {
           const rewritten = body.replace(/^(?!#)([^\s].+)$/gm, (line) => {
             const abs = absUrl(line, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              const h = stableHash("p", abs);
               m3u8Store.set(h, { url: abs });
               return "/api/mpxs/" + h;
             }
@@ -1601,7 +1760,7 @@ module.exports = async (req, res) => {
           }).replace(/URI="([^"]+)"/g, (match, uri) => {
             const abs = absUrl(uri, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              const h = stableHash("p", abs);
               m3u8Store.set(h, { url: abs });
               return 'URI="/api/mpxs/' + h + '"';
             }
@@ -1621,14 +1780,16 @@ module.exports = async (req, res) => {
       }
     }
 
-    // MegaPlay CDN Proxy: /api/mpxy?url=...
+    // MegaPlay CDN Proxy: /api/mpxy?url=
     if (path === "/api/mpxy") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl || !targetUrl.startsWith("http")) {
         return res.status(400).json({ error: "Invalid URL" });
       }
+      const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
+      const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
-        const r = await fetch(targetUrl, { headers: MEGAPLAY_HEADERS, redirect: "follow" });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
 
@@ -1639,7 +1800,7 @@ module.exports = async (req, res) => {
           const rewritten = body.replace(/^(?!#)([^\s].+)$/gm, (line) => {
             const abs = absUrl(line, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              const h = stableHash("p", abs);
               m3u8Store.set(h, { url: abs });
               return "/api/mpxs/" + h;
             }
@@ -1647,7 +1808,7 @@ module.exports = async (req, res) => {
           }).replace(/URI="([^"]+)"/g, (match, uri) => {
             const abs = absUrl(uri, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
+              const h = stableHash("p", abs);
               m3u8Store.set(h, { url: abs });
               return 'URI="/api/mpxs/' + h + '"';
             }
@@ -1975,6 +2136,178 @@ module.exports = async (req, res) => {
       }
     }
 
+    // ====== AniZone Routes ======
+    // GET /api/az/search?q=... (search AniZone by title)
+    if (path === "/api/az/search") {
+      const q = url.searchParams.get("q") || "";
+      if (!q) return res.status(400).json({ error: "Missing search query" });
+      try {
+        const results = await anizoneSearch(q);
+        return res.status(200).json({ query: q, results });
+      } catch (e) {
+        return res.status(500).json({ error: "AniZone search failed: " + e.message });
+      }
+    }
+
+    // GET /api/az/anime/:slug/episode/:ep (extract m3u8 from AniZone)
+    const azEpisode = path.match(/^\/api\/az\/anime\/([a-z0-9]+)\/episode\/(\d+)$/);
+    if (azEpisode) {
+      const slug = azEpisode[1];
+      const ep = parseInt(azEpisode[2]);
+      try {
+        const html = await anizoneFetchEpisode(slug, ep);
+        const data = anizoneParseEpisode(html, slug, ep);
+        const hash = stableHash("az", slug, ep);
+        m3u8Store.set(hash, { url: data.videoUrl });
+        return res.status(200).json({
+          success: true,
+          source: "anizone",
+          slug,
+          episode: ep,
+          title: data.title,
+          hash,
+          embedUrl: `/api/az/embed/${slug}/${ep}`,
+          m3u8: data.videoUrl,
+          tracks: data.tracks
+        });
+      } catch (e) {
+        return res.status(500).json({ error: "AniZone extract failed: " + e.message });
+      }
+    }
+
+    // GET /api/az/embed/:slug/:ep (player page for AniZone source)
+    const azEmbed = path.match(/^\/api\/az\/embed\/([a-z0-9]+)\/(\d+)$/);
+    if (azEmbed) {
+      const slug = azEmbed[1];
+      const ep = parseInt(azEmbed[2]);
+      try {
+        const html = await anizoneFetchEpisode(slug, ep);
+        const data = anizoneParseEpisode(html, slug, ep);
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
+          renderEmbedOnly(data.videoUrl, data.tracks, data.title + " EP" + ep, null, null)
+        );
+      } catch (e) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniZone: " + e.message));
+      }
+    }
+
+    // GET /api/az/player/:slug/:ep (full player page for AniZone)
+    const azPlayer = path.match(/^\/api\/az\/player\/([a-z0-9]+)\/(\d+)$/);
+    if (azPlayer) {
+      const slug = azPlayer[1];
+      const ep = parseInt(azPlayer[2]);
+      try {
+        const html = await anizoneFetchEpisode(slug, ep);
+        const data = anizoneParseEpisode(html, slug, ep);
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
+          renderMegaPlayer(data.videoUrl, data.tracks, data.title, null, null, 0, ep)
+        );
+      } catch (e) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniZone: " + e.message));
+      }
+    }
+
+    // ====== AniKage Routes ======
+
+    // GET /api/ak/servers/:anilist_id/episode/:num — available servers
+    const akServers = path.match(/^\/api\/ak\/servers\/(\d+)\/episode\/(\d+)$/);
+    if (akServers) {
+      const aid = parseInt(akServers[1]);
+      const ep = parseInt(akServers[2]);
+      try {
+        const data = await anikageGetServers(aid, ep);
+        return res.status(200).json({ success: true, anilistId: aid, episode: ep, servers: data.servers || [], embeds: data.embeds || [] });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
+    // GET /api/ak/sources/:anilist_id/episode/:num?server=neko&type=sub — sources with m3u8
+    const akSources = path.match(/^\/api\/ak\/sources\/(\d+)\/episode\/(\d+)$/);
+    if (akSources) {
+      const aid = parseInt(akSources[1]);
+      const ep = parseInt(akSources[2]);
+      const server = url.searchParams.get("server") || "neko";
+      const audioType = url.searchParams.get("type") || "sub";
+      try {
+        const sources = await anikageGetSources(aid, ep, server, audioType);
+        let m3u8 = null;
+        const results = [];
+        for (const emb of sources.embeds || []) {
+          if (emb.url && emb.url.includes(".m3u8")) { m3u8 = emb.url; results.push({ server: emb.server, url: emb.url, direct: true }); continue; }
+          try {
+            const url = await anikageScrapeEmbed(emb.url);
+            m3u8 = m3u8 || url;
+            results.push({ server: emb.server, embedUrl: emb.url, m3u8: url });
+          } catch { results.push({ server: emb.server, embedUrl: emb.url, error: "scrape failed" }); }
+        }
+        const tracks = (sources.subtitles || []).map(t => {
+          const file = t.file && t.file.startsWith("http") ? t.file : anikageSubFromEmbedUrl(t.embedUrl);
+          return { file: file || "", label: t.label || "English", kind: "captions", default: t.default || false };
+        }).filter(t => t.file);
+        return res.status(200).json({
+          success: true, anilistId: aid, episode: ep, server, type: audioType,
+          m3u8, tracks, intro: sources.intro || null, outro: sources.outro || null,
+          embedOptions: sources.embedOptions || [], embeds: results
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
+    // GET /api/ak/extract/:anilist_id/episode/:num — full auto-extract (uses best server)
+    const akExtract = path.match(/^\/api\/ak\/extract\/(\d+)\/episode\/(\d+)$/);
+    if (akExtract) {
+      const aid = parseInt(akExtract[1]);
+      const ep = parseInt(akExtract[2]);
+      const audioType = url.searchParams.get("type") || "sub";
+      try {
+        const data = await anikageExtract(aid, ep, audioType);
+        const hash = stableHash("ak", aid, ep, audioType);
+        m3u8Store.set(hash, { url: data.videoUrl });
+        return res.status(200).json({
+          success: true, source: "anikage", anilistId: aid, episode: ep, type: audioType,
+          server: data.server, hash, m3u8: data.videoUrl,
+          tracks: data.tracks, intro: data.intro, outro: data.outro,
+          servers: data.servers, embeds: data.embeds, embedOptions: data.embedOptions
+        });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
+    // GET /api/ak/embed/:hash — embed player page for AniKage (hash-based)
+    const akEmbedHash = path.match(/^\/api\/ak\/embed\/([a-z0-9]+)$/);
+    if (akEmbedHash) {
+      const hash = akEmbedHash[1];
+      const ent = akLookup.get(hash);
+      if (!ent) return res.status(404).json({ error: "Hash not found" });
+      try {
+        const data = await anikageExtract(ent.anilistId, ent.episode, ent.type);
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
+          renderEmbedOnly(data.videoUrl, data.tracks, "EP" + ent.episode, data.intro, data.outro)
+        );
+      } catch (e) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
+      }
+    }
+
+    // GET /api/ak/embed/:anilist_id/episode/:num — embed player page for AniKage (legacy)
+    const akEmbed = path.match(/^\/api\/ak\/embed\/(\d+)\/episode\/(\d+)$/);
+    if (akEmbed) {
+      const aid = parseInt(akEmbed[1]);
+      const ep = parseInt(akEmbed[2]);
+      const audioType = url.searchParams.get("type") || "sub";
+      try {
+        const data = await anikageExtract(aid, ep, audioType);
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
+          renderEmbedOnly(data.videoUrl, data.tracks, "EP" + ep, data.intro, data.outro)
+        );
+      } catch (e) {
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
+      }
+    }
+
     // Download MP4: /api/download/:mal_id/:season/:episode
     const dlMatch = path.match(/^\/api\/download\/(\d+)\/(\d+)\/(\d+)$/);
     if (dlMatch) {
@@ -2104,7 +2437,7 @@ module.exports = async (req, res) => {
         try {
           const result = await extractMegaPlayByMal(mid, ep, type);
           if (result && result.m3u8) {
-            const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
+            const hash = stableHash("wp", mid, ep, type);
             hashStore.set(hash, { m3u8: result.m3u8, tracks: result.tracks || [], title, intro: result.intro, outro: result.outro, malId: mid, epNum: ep, type });
             results[type] = { hash, url: "/api/watch-embed/" + hash };
           }
@@ -2258,53 +2591,98 @@ module.exports = async (req, res) => {
       const aid = parseInt(aniEmbedMatch[1]);
       const epNum = parseInt(aniEmbedMatch[2]);
       const type = url.searchParams.get("type") || "sub";
+      const source = url.searchParams.get("source") || "";
       try {
-        // Get MAL ID from AniList
-        const d = await anilistQuery(
-          `query($id:Int){Media(id:$id,type:ANIME){id idMal title{romaji english}}}`,
-          { id: aid }
-        );
+        let d;
+        try {
+          d = await anilistQuery(
+            `query($id:Int){Media(id:$id,type:ANIME){id idMal title{romaji english}}}`,
+            { id: aid }
+          );
+        } catch (e) {
+          return res.status(502).json({ error: "AniList API failed: " + e.message });
+        }
         if (!d.Media) return res.status(404).json({ error: "Anime not found" });
         const malId = d.Media.idMal;
         const title = d.Media.title?.romaji || d.Media.title?.english || "Unknown";
-        if (!malId) return res.status(400).json({ error: "No MAL ID mapping found" });
+        const audioType = type === "dub" ? "dub" : "sub";
 
-        // Extract from MegaPlay
-        const result = await extractMegaPlayByMal(malId, epNum, type === "dub" ? "dub" : "sub");
-        if (!result || !result.m3u8) return res.status(404).json({ error: "Episode not available" });
+        // If a specific source is requested, return single-source response (backward compat)
+        if (source === "anizone") {
+          if (!title) return res.status(400).json({ error: "No title for search" });
+          const azResult = await anizoneExtract(title, epNum);
+          const hash = stableHash("az", azResult.videoUrl);
+          m3u8Store.set(hash, { url: azResult.videoUrl });
+          return res.status(200).json({
+            success: true, source: "anizone", anilistId: aid, slug: azResult.slug,
+            title: azResult.title, episode: epNum, hash, m3u8: azResult.videoUrl, tracks: azResult.tracks
+          });
+        }
+        if (source === "anikage") {
+          const akResult = await anikageExtract(aid, epNum, audioType);
+          const hash = stableHash("ak", akResult.videoUrl);
+          m3u8Store.set(hash, { url: akResult.videoUrl });
+          return res.status(200).json({
+            success: true, source: "anikage", anilistId: aid, episode: epNum, type: audioType,
+            server: akResult.server, hash, m3u8: akResult.videoUrl, tracks: akResult.tracks,
+            intro: akResult.intro, outro: akResult.outro, servers: akResult.servers, embedOptions: akResult.embedOptions
+          });
+        }
+        if (source === "megaplay") {
+          if (!malId) return res.status(400).json({ error: "No MAL ID mapping found" });
+          const result = await extractMegaPlayByMal(malId, epNum, audioType);
+          if (!result || !result.m3u8) return res.status(404).json({ error: "Episode not available" });
+          const hash = stableHash("mp", result.m3u8);
+          m3u8Store.set(hash, { url: result.m3u8 });
+          const embedHash = stableHash("wp", malId, epNum, audioType);
+          hashStore.set(embedHash, { m3u8: result.m3u8, tracks: result.tracks || [], title, intro: result.intro || null, outro: result.outro || null, malId, epNum, type: audioType });
+          return res.status(200).json({
+            success: true, source: "megaplay", anilistId: aid, malId, title, episode: epNum, type: audioType,
+            hash, embedUrl: `/api/watch-embed/${embedHash}`, m3u8: result.m3u8, intro: result.intro || null, outro: result.outro || null,
+            tracks: (result.tracks || []).filter(t => t.kind === "captions").map(t => ({ file: t.file, label: t.label || "English", default: t.default || false }))
+          });
+        }
 
-        const hash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
-        m3u8Store.set(hash, { url: result.m3u8 });
-        const embedHash = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
-        hashStore.set(embedHash, {
-          m3u8: result.m3u8,
-          tracks: result.tracks || [],
-          title: title,
-          intro: result.intro || null,
-          outro: result.outro || null,
-          malId,
-          epNum,
-          type: type === "dub" ? "dub" : "sub"
-        });
+        // No source param: return embed URLs for ALL sources
+        const result = { success: true, anilistId: aid, malId, title, episode: epNum, sources: [] };
 
-        return res.status(200).json({
-          success: true,
-          anilistId: aid,
-          malId,
-          title,
-          episode: epNum,
-          type: type === "dub" ? "dub" : "sub",
-          hash,
-          embedUrl: `/api/watch-embed/${embedHash}`,
-          m3u8: result.m3u8,
-          intro: result.intro || null,
-          outro: result.outro || null,
-          tracks: (result.tracks || []).filter(t => t.kind === "captions").map(t => ({
-            file: t.file,
-            label: t.label || "English",
-            default: t.default || false
-          }))
-        });
+        // 1) MegaPlay sub + dub
+        if (malId) {
+          for (const t of ["sub", "dub"]) {
+            try {
+              const r = await extractMegaPlayByMal(malId, epNum, t);
+              if (r && r.m3u8) {
+                const h = stableHash("wp", malId, epNum, t);
+                hashStore.set(h, { m3u8: r.m3u8, tracks: r.tracks || [], title, intro: r.intro || null, outro: r.outro || null, malId, epNum, type: t });
+                result.sources.push({ source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, intro: r.intro || null, outro: r.outro || null });
+              }
+            } catch {}
+          }
+        }
+
+        // 2) AniZone
+        if (title) {
+          try {
+            const az = await anizoneExtract(title, epNum);
+            const h = stableHash("az", az.videoUrl);
+            m3u8Store.set(h, { url: az.videoUrl });
+            result.sources.push({ source: "anizone", label: "AniZone", slug: az.slug, embedUrl: `/api/az/embed/${az.slug}/${epNum}`, hash: h });
+          } catch {}
+        }
+
+        // 3) AniKage (all servers × sub/dub)
+        try {
+          const serversData = await anikageGetServers(aid, epNum);
+          for (const sv of serversData.servers || []) {
+            for (const st of (sv.subTypes || ["sub"])) {
+              const h = stableHash("ak_embed", aid, epNum, sv.id, st);
+              akLookup.set(h, { anilistId: aid, episode: epNum, server: sv.id, type: st });
+              result.sources.push({ source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` });
+            }
+          }
+        } catch {}
+
+        return res.status(200).json(result);
       } catch (e) {
         return res.status(500).json({ error: e.message });
       }
