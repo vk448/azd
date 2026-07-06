@@ -4,6 +4,7 @@ const JIKAN = "https://api.jikan.moe/v4";
 const ANILIST = "https://graphql.anilist.co";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const { spawn } = require("child_process");
+const PROXY_BASE = process.env.PROXY_BASE || "";
 
 function stableHash(...parts) {
   let h = 0;
@@ -1047,6 +1048,15 @@ async function extractMegaPlayByMal(malId, episode, type) {
 // ====== AniZone Helpers ======
 function nodeFetch(url, headers, redirectCount) {
   if (redirectCount === undefined) redirectCount = 5;
+  // Route through proxy if PROXY_BASE is set and target is a blocked host
+  const u = new URL(url);
+  if (PROXY_BASE && (u.hostname.endsWith("anikage.cc") || u.hostname.endsWith("anizone.to") || u.hostname.endsWith("vivibebe.site") || u.hostname.endsWith("bibiemb.xyz") || u.hostname.endsWith("cdn.anizara.store"))) {
+    return proxyFetch(url, headers, redirectCount);
+  }
+  return directFetch(url, headers, redirectCount);
+}
+
+function directFetch(url, headers, redirectCount) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const mod = u.protocol === "https:" ? require("https") : require("http");
@@ -1060,7 +1070,7 @@ function nodeFetch(url, headers, redirectCount) {
         const location = res.headers.location;
         if (location) {
           const absUrl = location.startsWith("http") ? location : new URL(location, url).href;
-          resolve(nodeFetch(absUrl, headers, redirectCount - 1));
+          resolve(directFetch(absUrl, headers, redirectCount - 1));
           return;
         }
       }
@@ -1074,6 +1084,14 @@ function nodeFetch(url, headers, redirectCount) {
     req.setTimeout(20000, () => { req.destroy(); reject(new Error("timeout")); });
     req.end();
   });
+}
+
+async function proxyFetch(url, headers, redirectCount) {
+  const isJson = (headers["Accept"] || "").includes("json");
+  const r = await fetch(`${PROXY_BASE}/?url=${encodeURIComponent(url)}&json=${isJson}`, { headers: { "User-Agent": UA } });
+  if (!r.ok) throw new Error("Proxy fetch failed: " + r.status);
+  const text = await r.text();
+  return { ok: r.status >= 200 && r.status < 300, status: r.status, text: () => text, json: () => { try { return JSON.parse(text); } catch { return {}; } } };
 }
 
 async function anizoneSearch(query) {
