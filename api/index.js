@@ -2371,6 +2371,16 @@ module.exports = async (req, res) => {
       if (!ent || ent.s !== "ak") {
         return res.status(404).json({ error: "Hash not found" });
       }
+      const preloaded = url.searchParams.get("m3u8");
+      if (preloaded) {
+        try {
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
+            renderEmbedOnly(preloaded, [], "EP" + ent.ep, null, null)
+          );
+        } catch (e) {
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
+        }
+      }
       const ck = `ak:${ent.aid}:${ent.ep}:${ent.server}:${ent.type}`;
       try {
         let cached = cacheGet(ck);
@@ -2558,6 +2568,16 @@ module.exports = async (req, res) => {
     if (watchEmbedMatch) {
       const hash = watchEmbedMatch[1];
       const decoded = decodeHash(hash);
+      // Fast path: if pre-fetched m3u8 URL provided, use directly (no upstream fetch)
+      const preloaded = url.searchParams.get("m3u8");
+      if (preloaded && decoded && decoded.s === "mp") {
+        try {
+          const html = renderEmbedOnly(preloaded, [], "EP" + decoded.ep, null, null);
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
+        } catch (e) {
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("MegaPlay: " + e.message));
+        }
+      }
       if (decoded && decoded.s === "mp") {
         const ck = `mp:${decoded.malId}:${decoded.ep}:${decoded.type}`;
         try {
@@ -2766,7 +2786,7 @@ module.exports = async (req, res) => {
         // No source param: return embed URLs for ALL sources
         const result = { success: true, anilistId: aid, malId, title, episode: epNum, sources: [] };
 
-        // 1) MegaPlay sub + dub
+        // 1) MegaPlay sub + dub (include m3u8 for instant playback)
         if (malId) {
           for (const t of ["sub", "dub"]) {
             try {
@@ -2778,7 +2798,7 @@ module.exports = async (req, res) => {
               }
               if (r && r.m3u8) {
                 const h = encodeHash({ s: "mp", aid, malId, ep: epNum, type: t });
-                result.sources.push({ source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, intro: r.intro || null, outro: r.outro || null });
+                result.sources.push({ source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, intro: r.intro || null, outro: r.outro || null });
               }
             } catch {}
           }
@@ -2792,29 +2812,44 @@ module.exports = async (req, res) => {
           } catch {}
         }
 
-        // 3) AniKage (validate each server before adding)
+        // 3) AniKage (pre-fetch first server for instant playback, list rest for fallback)
         try {
           const serversData = await anikageGetServers(aid, epNum);
-          const akPromises = (serversData.servers || []).flatMap(sv =>
-            (sv.subTypes || ["sub"]).map(async (st) => {
-              try {
-                const src = await anikageGetSources(aid, epNum, sv.id, st);
-                let hasStream = false;
-                for (const s of src.sources || []) {
-                  const dec = anikageDecrypt(s.url);
-                  if (dec && dec.includes(".m3u8")) { hasStream = true; break; }
-                }
-                if (hasStream) {
-                  const h = encodeHash({ s: "ak", aid, ep: epNum, server: sv.id, type: st });
-                  return { source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` };
-                }
-              } catch {}
-              return null;
-            })
-          );
-          const akResults = await Promise.allSettled(akPromises);
-          for (const r of akResults) {
-            if (r.status === "fulfilled" && r.value) result.sources.push(r.value);
+          let firstDone = false;
+          for (const sv of serversData.servers || []) {
+            for (const st of (sv.subTypes || ["sub"])) {
+              const h = encodeHash({ s: "ak", aid, ep: epNum, server: sv.id, type: st });
+              const entry = { source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` };
+              if (!firstDone) {
+                try {
+                  const ck = `ak:${aid}:${epNum}:${sv.id}:${st}`;
+                  let cached = cacheGet(ck);
+                  if (!cached) {
+                    const src = await anikageGetSources(aid, epNum, sv.id, st);
+                    let m3u8 = null;
+                    for (const s of src.sources || []) {
+                      const dec = anikageDecrypt(s.url);
+                      if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+                    }
+                    if (m3u8) {
+                      const tracks = (src.subtitles || []).map(t => {
+                        let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+                        if (!subUrl) subUrl = anikageDecrypt(t.file);
+                        if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+                        return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
+                      }).filter(t => t.file);
+                      cached = { m3u8, tracks, intro: src.intro || null, outro: src.outro || null };
+                      cacheSet(ck, cached);
+                    }
+                  }
+                  if (cached && cached.m3u8) {
+                    entry.m3u8 = cached.m3u8;
+                    firstDone = true;
+                  }
+                } catch {}
+              }
+              result.sources.push(entry);
+            }
           }
         } catch {}
 
