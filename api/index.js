@@ -1455,9 +1455,9 @@ vid.ontimeupdate=function(){if(!vid.duration)return;var p=(vid.currentTime/vid.d
 vid.onprogress=function(){if(vid.buffered.length>0)buf.style.width=(vid.buffered.end(vid.buffered.length-1)/vid.duration)*100+'%'};
 
 var swiping=false,swipeStartX=0,swipeStartTime=0;
-function seekFromEvent(clientX){var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
+function seekFromEvent(clientX){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
 pbarWrap.onclick=function(e){e.stopPropagation();seekFromEvent(e.clientX);startHide()};
-pbarWrap.onmousemove=function(e){var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
+pbarWrap.onmousemove=function(e){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
 pbarWrap.addEventListener('touchstart',function(e){e.preventDefault();touchSeeking=true;pbarWrap.classList.add('touching');var t=e.touches[0];seekFromEvent(t.clientX);startHide()},{passive:false});
 pbarWrap.addEventListener('touchmove',function(e){e.preventDefault();if(!touchSeeking)return;var t=e.touches[0];seekFromEvent(t.clientX);var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(t.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=Math.max(0,Math.min(r.width,t.clientX-r.left))+'px'},{passive:false});
 pbarWrap.addEventListener('touchend',function(e){touchSeeking=false;pbarWrap.classList.remove('touching');startHide()});
@@ -1754,9 +1754,9 @@ vid.ontimeupdate=function(){
 vid.onprogress=function(){if(vid.buffered.length>0)buf.style.width=(vid.buffered.end(vid.buffered.length-1)/vid.duration)*100+'%'};
 
 var swiping=false,swipeStartX=0,swipeStartTime=0;
-function seekFromEvent(clientX){var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
+function seekFromEvent(clientX){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
 pbarWrap.onclick=function(e){e.stopPropagation();seekFromEvent(e.clientX);startHide()};
-pbarWrap.onmousemove=function(e){var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
+pbarWrap.onmousemove=function(e){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
 pbarWrap.addEventListener('touchstart',function(e){e.preventDefault();touchSeeking=true;pbarWrap.classList.add('touching');var t=e.touches[0];seekFromEvent(t.clientX);startHide()},{passive:false});
 pbarWrap.addEventListener('touchmove',function(e){e.preventDefault();if(!touchSeeking)return;var t=e.touches[0];seekFromEvent(t.clientX);var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(t.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=Math.max(0,Math.min(r.width,t.clientX-r.left))+'px'},{passive:false});
 pbarWrap.addEventListener('touchend',function(e){touchSeeking=false;pbarWrap.classList.remove('touching');startHide()});
