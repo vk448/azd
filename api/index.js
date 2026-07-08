@@ -210,17 +210,14 @@ ${SHARED_BG}
 @keyframes scaleIn{from{transform:scale(0.5);opacity:0}to{transform:scale(1);opacity:1}}
 .etitle{font-size:22px;font-weight:800;margin-bottom:10px;color:#fff}
 .emsg{font-size:14px;color:rgba(255,255,255,0.45);line-height:1.6;margin-bottom:28px}
-.ehint{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,rgba(255,60,47,0.1),rgba(255,170,0,0.05));border:1px solid rgba(255,60,47,0.2);border-radius:12px;padding:12px 20px;font-size:13px;color:#ff6b35;font-weight:600;text-decoration:none;transition:all .3s}
-.ehint:hover{background:rgba(255,60,47,0.2);border-color:rgba(255,170,0,0.35);transform:translateY(-2px)}
 </style></head><body>
 <div class="animated-bg"></div>
 <div class="cpage">
 <div class="clogo"><div class="logo-icon"><i class="fas fa-bolt"></i></div><span class="logo-text">AnimeZilla</span></div>
 <div class="ecard">
 <div class="eicon"><i class="fas fa-exclamation-triangle"></i></div>
-<h1 class="etitle">Oops! Something went wrong</h1>
+<h1 class="etitle">Stream Unavailable</h1>
 <p class="emsg">${msg}</p>
-<a href="https://animezilla.vercel.app" class="ehint"><i class="fas fa-arrow-left"></i> Back to Website</a>
 </div>
 </div>
 </body></html>`;
