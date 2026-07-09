@@ -1428,7 +1428,7 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
   <div class="drop" id="cDrop"><div class="drop-hdr">Subtitles</div><div class="ditem active" id="ccOff">Off</div><div id="ccList"></div></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="https://ssl.jwpcdn.com/player/v/8.33.2/jwplayer.js"></script>
+<script src="https://cdn.jwplayer.com/libraries/IDzF9Zmk.js"></script>
 <script>
 (function(){
 var curTimer=null,touchSeeking=false;
@@ -1714,7 +1714,7 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
   <a href="/api/player/${malId}/${epNum + 1}">Next Episode ÔåÆ</a>
 </div>
 <div class="toast" id="toast"></div>
-<script src="https://ssl.jwpcdn.com/player/v/8.33.2/jwplayer.js"></script>
+<script src="https://cdn.jwplayer.com/libraries/IDzF9Zmk.js"></script>
 <script>
 (function(){
 var curTimer=null,touchSeeking=false;
