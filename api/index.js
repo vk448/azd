@@ -30,15 +30,42 @@ function decodeHash(hash) {
   }
 }
 
+// AniList cache + throttle — avoid 429 rate limits
+const anilistCache = new Map();
+const ANILIST_CACHE_TTL = 3600000; // 1 hour
+let anilistLastCall = 0;
+const ANILIST_THROTTLE_MS = 700; // ~85 req/min (limit is 90)
+
 async function anilistQuery(query, variables) {
-  const r = await fetch(ANILIST, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": UA },
-    body: JSON.stringify({ query, variables })
-  });
-  const d = await r.json();
-  if (d.errors) throw new Error(d.errors[0].message);
-  return d.data;
+  // Cache key based on query + variables
+  const cacheKey = JSON.stringify({ q: query, v: variables });
+  const cached = anilistCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < ANILIST_CACHE_TTL) return cached.data;
+
+  // Throttle — wait if needed
+  const now = Date.now();
+  const wait = ANILIST_THROTTLE_MS - (now - anilistLastCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  anilistLastCall = Date.now();
+
+  // Fetch with retry on 429
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch(ANILIST, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": UA },
+      body: JSON.stringify({ query, variables })
+    });
+    if (r.status === 429) {
+      const retryAfter = parseInt(r.headers.get("retry-after") || "5");
+      await new Promise(res => setTimeout(res, retryAfter * 1000));
+      continue;
+    }
+    const d = await r.json();
+    if (d.errors) throw new Error(d.errors[0].message);
+    anilistCache.set(cacheKey, { ts: Date.now(), data: d.data });
+    return d.data;
+  }
+  throw new Error("AniList API rate limited after retries");
 }
 
 function slugify(t) {
