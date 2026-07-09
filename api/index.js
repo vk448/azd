@@ -1431,6 +1431,8 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
 <script src="https://cdn.jwplayer.com/libraries/IDzF9Zmk.js"></script>
 <script>
 (function(){
+function initPlayer(){
+if(typeof jwplayer==='undefined'){setTimeout(initPlayer,100);return}
 var curTimer=null,touchSeeking=false;
 var introData=${introJSON},outroData=${outroJSON};
 var player=jwplayer('jwplayer').setup({
@@ -1531,6 +1533,8 @@ box.ondblclick=function(e){if(e.target===box||e.target.id==='jwplayer')fsBtn.cli
 document.onkeydown=function(e){if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;switch(e.key){case' ':e.preventDefault();togglePlay();startHide();break;case'ArrowLeft':e.preventDefault();player.seek(Math.max(0,player.getPosition()-10));showToast('-10s');startHide();break;case'ArrowRight':e.preventDefault();player.seek(Math.min(player.getDuration(),player.getPosition()+10));showToast('+10s');startHide();break;case'ArrowUp':e.preventDefault();var v=Math.min(100,player.getVolume()+10);player.setVolume(v);volRange.value=v/100;showToast(v+'%');startHide();break;case'ArrowDown':e.preventDefault();var v2=Math.max(0,player.getVolume()-10);player.setVolume(v2);volRange.value=v2/100;showToast(v2+'%');startHide();break;case'f':case'F':fsBtn.click();break;case'm':case'M':muteBtn.click();break}};
 var skipShown=false;
 function checkSkip(t){if(introData&&t>=introData.start&&t<introData.end&&!skipShown){skipbtn.textContent='SKIP INTRO \\u25B6';skipbtn.classList.add('show');skipShown=true;skipbtn.onclick=function(){player.seek(introData.end);skipbtn.classList.remove('show');skipShown=false;showToast('Skipped')}}else if(outroData&&t>=outroData.start&&t<outroData.end&&!skipShown){skipbtn.textContent='SKIP OUTRO \\u25B6';skipbtn.classList.add('show');skipShown=true;skipbtn.onclick=function(){player.seek(outroData.end);skipbtn.classList.remove('show');skipShown=false;showToast('Skipped')}}else if(skipShown){var done=false;if(introData&&t>=introData.end)done=true;if(outroData&&t>=outroData.end)done=true;if(!introData&&!outroData)done=true;if(done){skipbtn.classList.remove('show');skipShown=false}}}
+}
+initPlayer();
 })();
 </script></body></html>`;
 }
@@ -1717,6 +1721,8 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
 <script src="https://cdn.jwplayer.com/libraries/IDzF9Zmk.js"></script>
 <script>
 (function(){
+function initPlayer(){
+if(typeof jwplayer==='undefined'){setTimeout(initPlayer,100);return}
 var curTimer=null,touchSeeking=false;
 var introData=${introJSON},outroData=${outroJSON};
 var player=jwplayer('jwplayer').setup({
@@ -1820,6 +1826,8 @@ box.ondblclick=function(e){if(e.target===box||e.target.id==='jwplayer')fsBtn.cli
 document.onkeydown=function(e){if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;switch(e.key){case' ':e.preventDefault();togglePlay();startHide();break;case'ArrowLeft':e.preventDefault();player.seek(Math.max(0,player.getPosition()-10));showToast('-10s');startHide();break;case'ArrowRight':e.preventDefault();player.seek(Math.min(player.getDuration(),player.getPosition()+10));showToast('+10s');startHide();break;case'ArrowUp':e.preventDefault();var v=Math.min(100,player.getVolume()+10);player.setVolume(v);volRange.value=v/100;showToast(v+'%');startHide();break;case'ArrowDown':e.preventDefault();var v2=Math.max(0,player.getVolume()-10);player.setVolume(v2);volRange.value=v2/100;showToast(v2+'%');startHide();break;case'f':case'F':fsBtn.click();break;case'm':case'M':muteBtn.click();break}};
 var skipShown=false;
 function checkSkip(t){if(introData&&t>=introData.start&&t<introData.end&&!skipShown){skipbtn.textContent='SKIP INTRO \\u25B6';skipbtn.classList.add('show');skipShown=true;skipbtn.onclick=function(){player.seek(introData.end);skipbtn.classList.remove('show');skipShown=false;showToast('Skipped')}}else if(outroData&&t>=outroData.start&&t<outroData.end&&!skipShown){skipbtn.textContent='SKIP OUTRO \\u25B6';skipbtn.classList.add('show');skipShown=true;skipbtn.onclick=function(){player.seek(outroData.end);skipbtn.classList.remove('show');skipShown=false;showToast('Skipped')}}else if(skipShown){var done=false;if(introData&&t>=introData.end)done=true;if(outroData&&t>=outroData.end)done=true;if(!introData&&!outroData)done=true;if(done){skipbtn.classList.remove('show');skipShown=false}}}
+}
+initPlayer();
 })();
 </script></body></html>`;
 }
