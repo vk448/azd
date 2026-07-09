@@ -6,6 +6,30 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const { spawn } = require("child_process");
 const PROXY_BASE = process.env.PROXY_BASE || "";
 
+function detectLangCode(label) {
+  const l = String(label).toLowerCase();
+  if (/english|eng|en[\s_-]/i.test(l)) return "en";
+  if (/japanese|jpn|jp|jap/i.test(l)) return "ja";
+  if (/spanish|esp|spa/i.test(l)) return "es";
+  if (/portuguese|por|pt/i.test(l)) return "pt";
+  if (/french|fra|fre|fr/i.test(l)) return "fr";
+  if (/german|deu|ger|de/i.test(l)) return "de";
+  if (/arabic|ara|ar/i.test(l)) return "ar";
+  if (/hindi|hin|hi/i.test(l)) return "hi";
+  if (/russian|rus|ru/i.test(l)) return "ru";
+  if (/indonesian|ind|id/i.test(l)) return "id";
+  if (/malay|msa|ms/i.test(l)) return "ms";
+  if (/turkish|tur|tr/i.test(l)) return "tr";
+  if (/italian|ita|it/i.test(l)) return "it";
+  if (/korean|kor|ko/i.test(l)) return "ko";
+  if (/thai|tha|th/i.test(l)) return "th";
+  if (/vietnamese|vie|vi/i.test(l)) return "vi";
+  if (/chinese|zho|zh/i.test(l)) return "zh";
+  if (/polish|pol|pl/i.test(l)) return "pl";
+  if (/dutch|nld|nl/i.test(l)) return "nl";
+  return "en";
+}
+
 function stableHash(...parts) {
   let h = 0;
   for (const p of parts) {
@@ -1253,7 +1277,9 @@ async function anikageExtract(anilistId, episodeNum, audioType) {
     let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
     if (!subUrl) subUrl = anikageDecrypt(t.file);
     if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
-    return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
+    const label = t.label || "English";
+    const srclang = t.srclang || t.lang || detectLangCode(label);
+    return { file: subUrl || "", label, srclang, kind: "captions", default: t.default || false };
   }).filter(t => t.file);
 
   return {
@@ -1275,7 +1301,9 @@ function renderEmbedOnly(m3u8Url, tracks, title, intro, outro, existingHash) {
   const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
     const th = stableHash("tr", t.file);
     m3u8Store.set(th, { url: t.file });
-    return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
+    const lang = t.srclang || "en";
+    const lbl = t.label || "English";
+    return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${lbl}" ${t.default ? "default" : ""}>`;
   }).join("\n");
   const introJSON = intro ? JSON.stringify(intro) : "null";
   const outroJSON = outro ? JSON.stringify(outro) : "null";
@@ -1513,7 +1541,8 @@ function renderMegaPlayer(m3u8Url, tracks, title, intro, outro, malId, epNum) {
   const trackTags = (tracks || []).filter(t => t.kind === "captions").map(t => {
     const th = stableHash("tr", t.file);
     m3u8Store.set(th, { url: t.file });
-    return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
+    const lang = t.srclang || "en";
+    return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
   const titleClean = title ? title.replace(/[-\s]*EP\d+/i, "").trim() : "Anime";
   const introJSON = intro ? JSON.stringify(intro) : "null";
@@ -2835,7 +2864,7 @@ module.exports = async (req, res) => {
               }
               if (r && r.m3u8) {
                 const h = encodeHash({ s: "mp", aid, malId, ep: epNum, type: t });
-                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, tracks: (r.tracks || []).filter(tr => tr.kind === "captions").map(tr => ({ file: tr.file, label: tr.label || "English", default: tr.default || false })), intro: r.intro || null, outro: r.outro || null };
+                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, tracks: (r.tracks || []).filter(tr => tr.kind === "captions").map(tr => ({ file: tr.file, label: tr.label || "English", srclang: tr.srclang || tr.lang || detectLangCode(tr.label || ""), default: tr.default || false })), intro: r.intro || null, outro: r.outro || null };
               }
               return null;
             }));
