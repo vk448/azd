@@ -3,8 +3,7 @@ const AJAX = "https://9anime.org.lv/wp-admin/admin-ajax.php";
 const JIKAN = "https://api.jikan.moe/v4";
 const ANILIST = "https://graphql.anilist.co";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-const { spawn } = require("child_process");
-const PROXY_BASE = process.env.PROXY_BASE || "";
+const PROXY_BASE = (typeof process !== "undefined" && process.env && process.env.PROXY_BASE) || "";
 
 function stableHash(...parts) {
   let h = 0;
@@ -19,12 +18,14 @@ function stableHash(...parts) {
 }
 
 function encodeHash(obj) {
-  return Buffer.from(JSON.stringify(obj)).toString("base64url");
+  return btoa(JSON.stringify(obj)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function decodeHash(hash) {
   try {
-    return JSON.parse(Buffer.from(hash, "base64url").toString("utf8"));
+    const padded = hash.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(escape(atob(padded)));
+    return JSON.parse(json);
   } catch {
     return null;
   }
@@ -1122,33 +1123,11 @@ function nodeFetch(url, headers, redirectCount) {
 }
 
 function directFetch(url, headers, redirectCount) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const mod = u.protocol === "https:" ? require("https") : require("http");
-    const opts = {
-      hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80),
-      path: u.pathname + u.search, method: "GET",
-      headers: { ...headers }, rejectUnauthorized: false,
-    };
-    const req = mod.request(opts, (res) => {
-      if ((res.statusCode === 301 || res.statusCode === 302) && redirectCount > 0) {
-        const location = res.headers.location;
-        if (location) {
-          const absUrl = location.startsWith("http") ? location : new URL(location, url).href;
-          resolve(directFetch(absUrl, headers, redirectCount - 1));
-          return;
-        }
-      }
-      let data = "";
-      res.on("data", (chunk) => data += chunk);
-      res.on("end", () => {
-        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: () => data, json: () => JSON.parse(data) });
-      });
+  return fetch(url, { headers: { ...headers }, redirect: "follow" })
+    .then(async (r) => {
+      const data = await r.text();
+      return { ok: r.ok, status: r.status, text: () => data, json: () => { try { return JSON.parse(data); } catch { return {}; } } };
     });
-    req.on("error", reject);
-    req.setTimeout(20000, () => { req.destroy(); reject(new Error("timeout")); });
-    req.end();
-  });
 }
 
 async function proxyFetch(url, headers, redirectCount) {
@@ -1849,7 +1828,7 @@ function fTime(s){if(!s||isNaN(s))return'0:00';var m=Math.floor(s/60);var sec=Ma
 })();
 </script></body></html>`;
 }
-module.exports = async (req, res) => {
+export default async (req, res) => {
   const ERR_MSG = "Invalid or non-existent MAL ID. Please check the MAL ID and try again.";
   const ERR_404 = "This anime was not found on our source. It may not have episodes uploaded yet.";
 
@@ -1905,7 +1884,7 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.send(Buffer.from(buffer));
+        return res.send(new Uint8Array(buffer));
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1954,7 +1933,7 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.send(Buffer.from(buffer));
+        return res.send(new Uint8Array(buffer));
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -2017,7 +1996,7 @@ module.exports = async (req, res) => {
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=3600");
 
-        const buffer = Buffer.from(await r.arrayBuffer());
+        const buffer = new Uint8Array(await r.arrayBuffer());
         return res.send(buffer);
       } catch (e) {
         return res.status(500).json({ error: "Segment error: " + e.message });
