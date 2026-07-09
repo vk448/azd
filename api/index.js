@@ -223,6 +223,17 @@ ${SHARED_BG}
 </body></html>`;
 }
 
+function renderMegaPlayFallback(anilistId, ep, lang) {
+  const url = `https://megaplay.buzz/stream/ani/${anilistId}/${ep}/${lang || 'sub'}`;
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AnimeZilla Player</title>
+<style>body{margin:0;padding:0;background:#000;overflow:hidden}iframe{width:100%;height:100%;border:none}</style>
+</head><body>
+<iframe src="${url}" allowfullscreen></iframe>
+</body></html>`;
+}
+
 function renderUnavailable(name, ep, img) {
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -2389,7 +2400,7 @@ module.exports = async (req, res) => {
             renderEmbedOnly(preloaded, tracks, "EP" + ent.ep, intro, outro)
           );
         } catch (e) {
-          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(ent.aid, ent.ep, ent.type));
         }
       }
       const ck = `ak:${ent.aid}:${ent.ep}:${ent.server}:${ent.type}`;
@@ -2416,7 +2427,7 @@ module.exports = async (req, res) => {
           renderEmbedOnly(cached.m3u8, cached.tracks, "EP" + ent.ep, cached.intro, cached.outro)
         );
       } catch (e) {
-        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(ent.aid, ent.ep, ent.type));
       }
     }
 
@@ -2432,7 +2443,7 @@ module.exports = async (req, res) => {
           renderEmbedOnly(data.videoUrl, data.tracks, "EP" + ep, data.intro, data.outro)
         );
       } catch (e) {
-        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(aid, ep, audioType));
       }
     }
 
@@ -2591,7 +2602,7 @@ module.exports = async (req, res) => {
           const html = renderEmbedOnly(preloaded, tracks, "EP" + decoded.ep, intro, outro);
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
         } catch (e) {
-          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("MegaPlay: " + e.message));
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(decoded.aid || decoded.malId, decoded.ep, decoded.type));
         }
       }
       if (decoded && decoded.s === "mp") {
@@ -2608,7 +2619,7 @@ module.exports = async (req, res) => {
           }
           return res.status(404).json({ error: "Episode not available" });
         } catch (e) {
-          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("MegaPlay: " + e.message));
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(decoded.aid || decoded.malId, decoded.ep, decoded.type));
         }
       }
       const data = hashStore.get(hash);
