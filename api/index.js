@@ -1435,7 +1435,7 @@ var vid=document.getElementById('vid'),box=document.getElementById('box'),cplay=
 var hls=null,curTimer=null,touchSeeking=false,buffTimer=null;
 var introData=${introJSON},outroData=${outroJSON};
 if(Hls.isSupported()){
-   hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:10000,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingMaxRetry:5,levelLoadingMaxRetry:5,fragLoadingMaxRetry:8,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
+   hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:30000,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingMaxRetry:5,levelLoadingMaxRetry:5,fragLoadingMaxRetry:8,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
@@ -1463,11 +1463,11 @@ function buildQuality(levels){
   levels.forEach(function(l,i){
     var h=l.height||0;if(!h||h<360||h>2160||seen[h])return;seen[h]=true;
     var el=document.createElement('div');el.className='ditem';el.textContent=h+'p';
-    el.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=i;hls.loadLevel=i}qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');qAuto.classList.remove('active');showToast(h+'p');closeDrops()};
+    el.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=i;hls.loadLevel=i}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');qAuto.classList.remove('active');showToast(h+'p');closeDrops()};
     qList.appendChild(el);
   });
 }
-qAuto.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=-1;hls.loadLevel=-1}qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});qAuto.classList.add('active');showToast('Auto');closeDrops()};
+qAuto.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=-1;hls.loadLevel=-1}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});qAuto.classList.add('active');showToast('Auto');closeDrops()};
 function buildCaptions(){
   ccList.innerHTML='';var tt=vid.textTracks;if(!tt)return;
   for(var i=0;i<tt.length;i++){(function(idx){
@@ -1715,7 +1715,7 @@ var vid=document.getElementById('vid'),box=document.getElementById('box'),cplay=
 var hls=null,curTimer=null,touchSeeking=false,buffTimer=null;
 var introData=${introJSON},outroData=${outroJSON};
 if(Hls.isSupported()){
-  hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:10000,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingMaxRetry:5,levelLoadingMaxRetry:5,fragLoadingMaxRetry:8,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
+  hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:30000,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingMaxRetry:5,levelLoadingMaxRetry:5,fragLoadingMaxRetry:8,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
@@ -1738,8 +1738,8 @@ function autoSubs(){setTimeout(function(){
   })(i)}
   setTimeout(buildCaptions,1500);
 },2000)}
-function buildQuality(levels){qList.innerHTML='';var seen={};levels.forEach(function(l,i){var h=l.height||0;if(!h||h<360||h>2160||seen[h])return;seen[h]=true;var el=document.createElement('div');el.className='ditem';el.textContent=h+'p';el.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=i;hls.loadLevel=i}qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');qAuto.classList.remove('active');showToast(h+'p');closeDrops()};qList.appendChild(el)})}
-qAuto.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=-1;hls.loadLevel=-1}qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});qAuto.classList.add('active');showToast('Auto');closeDrops()};
+function buildQuality(levels){qList.innerHTML='';var seen={};levels.forEach(function(l,i){var h=l.height||0;if(!h||h<360||h>2160||seen[h])return;seen[h]=true;var el=document.createElement('div');el.className='ditem';el.textContent=h+'p';el.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=i;hls.loadLevel=i}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');qAuto.classList.remove('active');showToast(h+'p');closeDrops()};qList.appendChild(el)})}
+qAuto.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=-1;hls.loadLevel=-1}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});qAuto.classList.add('active');showToast('Auto');closeDrops()};
 function buildCaptions(){ccList.innerHTML='';var tt=vid.textTracks;if(!tt)return;for(var i=0;i<tt.length;i++){(function(idx){var t=tt[idx];t.mode='hidden';var el=document.createElement('div');el.className='ditem';el.textContent=t.label||'CC '+(idx+1);el.onclick=function(e){e.stopPropagation();for(var j=0;j<tt.length;j++)tt[j].mode='hidden';t.mode='showing';ccList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');ccOff.classList.remove('active');showToast('CC: '+t.label);closeDrops()};ccList.appendChild(el)})(i)}}
 setTimeout(buildCaptions,1200);
 ccOff.onclick=function(e){e.stopPropagation();var tt=vid.textTracks;if(tt)for(var i=0;i<tt.length;i++)tt[i].mode='hidden';ccList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});ccOff.classList.add('active');showToast('Subtitles Off');closeDrops()};
