@@ -1826,6 +1826,12 @@ module.exports = async (req, res) => {
   const ERR_MSG = "Invalid or non-existent MAL ID. Please check the MAL ID and try again.";
   const ERR_404 = "This anime was not found on our source. It may not have episodes uploaded yet.";
 
+  // CORS headers — allow all origins
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.status(204).end();
+
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const path = url.pathname.replace(/\/+$/, "");
