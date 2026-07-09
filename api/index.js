@@ -2281,8 +2281,17 @@ module.exports = async (req, res) => {
       const preloaded = url.searchParams.get("m3u8");
       if (preloaded) {
         const ck = `az:${ep}:${slug}`;
-        const cached = cacheGet(ck);
-        const tracks = cached?.tracks || [];
+        let cached = cacheGet(ck);
+        let tracks = cached?.tracks || [];
+        // Cache miss — re-fetch from AniZone
+        if (!cached) {
+          try {
+            const html = await anizoneFetchEpisode(slug, ep);
+            const data = anizoneParseEpisode(html, slug, ep);
+            tracks = data.tracks || [];
+            cacheSet(ck, { m3u8: data.videoUrl, tracks });
+          } catch (_) {}
+        }
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
           renderEmbedOnly(preloaded, tracks, "AniZone EP" + ep, null, null)
         );
@@ -2392,10 +2401,32 @@ module.exports = async (req, res) => {
       const preloaded = url.searchParams.get("m3u8");
       if (preloaded) {
         const ck = `ak:${ent.aid}:${ent.ep}:${ent.server}:${ent.type}`;
-        const cached = cacheGet(ck);
-        const tracks = cached?.tracks || [];
-        const intro = cached?.intro || null;
-        const outro = cached?.outro || null;
+        let cached = cacheGet(ck);
+        let tracks = cached?.tracks || [];
+        let intro = cached?.intro || null;
+        let outro = cached?.outro || null;
+        // Cache miss (serverless cold start) — re-fetch tracks from AniKage
+        if (!cached) {
+          try {
+            const sources = await anikageGetSources(ent.aid, ent.ep, ent.server, ent.type);
+            let m3u8 = null;
+            for (const src of sources.sources || []) {
+              const dec = anikageDecrypt(src.url);
+              if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+            }
+            if (m3u8) {
+              tracks = (sources.subtitles || []).map(t => {
+                let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+                if (!subUrl) subUrl = anikageDecrypt(t.file);
+                if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+                return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
+              }).filter(t => t.file);
+              intro = sources.intro || null;
+              outro = sources.outro || null;
+              cacheSet(ck, { m3u8, tracks, intro, outro });
+            }
+          } catch (_) {}
+        }
         try {
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
             renderEmbedOnly(preloaded, tracks, "EP" + ent.ep, intro, outro)
@@ -2595,10 +2626,22 @@ module.exports = async (req, res) => {
       const preloaded = url.searchParams.get("m3u8");
       if (preloaded && decoded && decoded.s === "mp") {
         const ck = `mp:${decoded.malId}:${decoded.ep}:${decoded.type}`;
-        const cached = cacheGet(ck);
-        const tracks = cached?.tracks || [];
-        const intro = cached?.intro || null;
-        const outro = cached?.outro || null;
+        let cached = cacheGet(ck);
+        let tracks = cached?.tracks || [];
+        let intro = cached?.intro || null;
+        let outro = cached?.outro || null;
+        // Cache miss (serverless cold start) — re-fetch tracks from MegaPlay
+        if (!cached && decoded.malId) {
+          try {
+            const r = await extractMegaPlayByMal(decoded.malId, decoded.ep, decoded.type);
+            if (r && r.m3u8) {
+              cacheSet(ck, r);
+              tracks = r.tracks || [];
+              intro = r.intro || null;
+              outro = r.outro || null;
+            }
+          } catch (_) {}
+        }
         try {
           const html = renderEmbedOnly(preloaded, tracks, "EP" + decoded.ep, intro, outro);
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
