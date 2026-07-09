@@ -2810,10 +2810,13 @@ module.exports = async (req, res) => {
         // No source param: return embed URLs for ALL sources
         const result = { success: true, anilistId: aid, malId, title, episode: epNum, sources: [] };
 
-        // 1) MegaPlay sub + dub (include m3u8 for instant playback)
-        if (malId) {
-          for (const t of ["sub", "dub"]) {
-            try {
+        // Run all 3 sources in parallel
+        const [mpResults, azResult, akResult] = await Promise.allSettled([
+          // 1) MegaPlay sub + dub
+          (async () => {
+            if (!malId) return [];
+            const out = [];
+            const entries = await Promise.allSettled(["sub", "dub"].map(async t => {
               const ck = `mp:${malId}:${epNum}:${t}`;
               let r = cacheGet(ck);
               if (!r) {
@@ -2822,60 +2825,66 @@ module.exports = async (req, res) => {
               }
               if (r && r.m3u8) {
                 const h = encodeHash({ s: "mp", aid, malId, ep: epNum, type: t });
-                result.sources.push({ source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, intro: r.intro || null, outro: r.outro || null });
+                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, intro: r.intro || null, outro: r.outro || null };
               }
-            } catch {}
-          }
-        }
-
-        // 2) AniZone
-        if (title) {
-          try {
+              return null;
+            }));
+            for (const e of entries) { if (e.status === "fulfilled" && e.value) out.push(e.value); }
+            return out;
+          })(),
+          // 2) AniZone
+          (async () => {
+            if (!title) return null;
             const az = await anizoneExtract(title, epNum);
-            result.sources.push({ source: "anizone", label: "AniZone", slug: az.slug, embedUrl: `/api/az/embed/${az.slug}/${epNum}` });
-          } catch {}
-        }
-
-        // 3) AniKage (pre-fetch first server for instant playback, list rest for fallback)
-        try {
-          const serversData = await anikageGetServers(aid, epNum);
-          let firstDone = false;
-          for (const sv of serversData.servers || []) {
-            for (const st of (sv.subTypes || ["sub"])) {
-              const h = encodeHash({ s: "ak", aid, ep: epNum, server: sv.id, type: st });
-              const entry = { source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` };
-              if (!firstDone) {
-                try {
-                  const ck = `ak:${aid}:${epNum}:${sv.id}:${st}`;
-                  let cached = cacheGet(ck);
-                  if (!cached) {
-                    const src = await anikageGetSources(aid, epNum, sv.id, st);
-                    let m3u8 = null;
-                    for (const s of src.sources || []) {
-                      const dec = anikageDecrypt(s.url);
-                      if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+            return { source: "anizone", label: "AniZone", slug: az.slug, embedUrl: `/api/az/embed/${az.slug}/${epNum}` };
+          })(),
+          // 3) AniKage
+          (async () => {
+            const serversData = await anikageGetServers(aid, epNum);
+            const out = [];
+            let firstDone = false;
+            for (const sv of serversData.servers || []) {
+              for (const st of (sv.subTypes || ["sub"])) {
+                const h = encodeHash({ s: "ak", aid, ep: epNum, server: sv.id, type: st });
+                const entry = { source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` };
+                if (!firstDone) {
+                  try {
+                    const ck = `ak:${aid}:${epNum}:${sv.id}:${st}`;
+                    let cached = cacheGet(ck);
+                    if (!cached) {
+                      const src = await anikageGetSources(aid, epNum, sv.id, st);
+                      let m3u8 = null;
+                      for (const s of src.sources || []) {
+                        const dec = anikageDecrypt(s.url);
+                        if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+                      }
+                      if (m3u8) {
+                        const tracks = (src.subtitles || []).map(t => {
+                          let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+                          if (!subUrl) subUrl = anikageDecrypt(t.file);
+                          if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+                          return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
+                        }).filter(t => t.file);
+                        cached = { m3u8, tracks, intro: src.intro || null, outro: src.outro || null };
+                        cacheSet(ck, cached);
+                      }
                     }
-                    if (m3u8) {
-                      const tracks = (src.subtitles || []).map(t => {
-                        let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
-                        if (!subUrl) subUrl = anikageDecrypt(t.file);
-                        if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
-                        return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
-                      }).filter(t => t.file);
-                      cached = { m3u8, tracks, intro: src.intro || null, outro: src.outro || null };
-                      cacheSet(ck, cached);
+                    if (cached && cached.m3u8) {
+                      entry.m3u8 = cached.m3u8;
+                      firstDone = true;
                     }
-                  }
-                  if (cached && cached.m3u8) {
-                    entry.m3u8 = cached.m3u8;
-                    firstDone = true;
-                  }
-                } catch {}
+                  } catch {}
+                }
+                out.push(entry);
               }
-              result.sources.push(entry);
             }
-          }
-        } catch {}
+            return out;
+          })()
+        ]);
+
+        if (mpResults.status === "fulfilled") result.sources.push(...mpResults.value);
+        if (azResult.status === "fulfilled" && azResult.value) result.sources.push(azResult.value);
+        if (akResult.status === "fulfilled") result.sources.push(...akResult.value);
 
         return res.status(200).json(result);
       } catch (e) {
