@@ -727,7 +727,7 @@ document.addEventListener("click",function(){qualityMenu.classList.remove("visib
 
 // HLS Setup
 if(m3u8&&Hls.isSupported()){
-  hls=new Hls({maxBufferLength:30,startLevel:-1,enableWorker:true,lowLatencyMode:false});
+  hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30,enableWorker:true,lowLatencyMode:false,startLevel:-1,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:10000,backBufferLength:0,manifestLoadingMaxRetry:3,levelLoadingMaxRetry:3});
   hls.loadSource(m3u8);
   hls.attachMedia(video);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,data){
@@ -1272,7 +1272,7 @@ async function anikageExtract(anilistId, episodeNum, audioType) {
 function renderEmbedOnly(m3u8Url, tracks, title, intro, outro, existingHash) {
   const hash = existingHash || stableHash("eo", m3u8Url);
   if (!existingHash) m3u8Store.set(hash, { url: m3u8Url });
-  const trackTags = (tracks || []).filter(t => t.kind === "captions" || t.kind === "subtitles").map(t => {
+  const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
     const th = stableHash("tr", t.file);
     m3u8Store.set(th, { url: t.file });
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="en" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
@@ -1409,7 +1409,7 @@ var vid=document.getElementById('vid'),box=document.getElementById('box'),cplay=
 var hls=null,curTimer=null,touchSeeking=false;
 var introData=${introJSON},outroData=${outroJSON};
 if(Hls.isSupported()){
-  hls=new Hls({maxBufferLength:30,manifestLoadingTimeOut:15000,levelLoadingTimeOut:15000,backBufferLength:0,enableWorker:true});
+  hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:10000,backBufferLength:0,enableWorker:true,lowLatencyMode:false,startLevel:-1,manifestLoadingMaxRetry:3,levelLoadingMaxRetry:3});
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
@@ -1695,7 +1695,7 @@ var hls=null,curTimer=null,touchSeeking=false;
 var introData=${introJSON},outroData=${outroJSON};
 
 if(Hls.isSupported()){
-  hls=new Hls({maxBufferLength:30,manifestLoadingTimeOut:15000,levelLoadingTimeOut:15000,backBufferLength:0,enableWorker:true});
+  hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:10000,backBufferLength:0,enableWorker:true,lowLatencyMode:false,startLevel:-1,manifestLoadingMaxRetry:3,levelLoadingMaxRetry:3});
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
@@ -2396,10 +2396,15 @@ module.exports = async (req, res) => {
         return res.status(404).json({ error: "Hash not found" });
       }
       const preloaded = url.searchParams.get("m3u8");
+      const preloadedTracks = url.searchParams.get("tracks");
       if (preloaded) {
         try {
+          let tracks = [];
+          if (preloadedTracks) {
+            try { tracks = JSON.parse(Buffer.from(preloadedTracks, "base64url").toString("utf8")); } catch {}
+          }
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
-            renderEmbedOnly(preloaded, [], "EP" + ent.ep, null, null)
+            renderEmbedOnly(preloaded, tracks, "EP" + ent.ep, null, null)
           );
         } catch (e) {
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
@@ -2594,9 +2599,14 @@ module.exports = async (req, res) => {
       const decoded = decodeHash(hash);
       // Fast path: if pre-fetched m3u8 URL provided, use directly (no upstream fetch)
       const preloaded = url.searchParams.get("m3u8");
+      const preloadedTracks = url.searchParams.get("tracks");
       if (preloaded && decoded && decoded.s === "mp") {
         try {
-          const html = renderEmbedOnly(preloaded, [], "EP" + decoded.ep, null, null);
+          let tracks = [];
+          if (preloadedTracks) {
+            try { tracks = JSON.parse(Buffer.from(preloadedTracks, "base64url").toString("utf8")); } catch {}
+          }
+          const html = renderEmbedOnly(preloaded, tracks, "EP" + decoded.ep, null, null);
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
         } catch (e) {
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("MegaPlay: " + e.message));
@@ -2825,7 +2835,7 @@ module.exports = async (req, res) => {
               }
               if (r && r.m3u8) {
                 const h = encodeHash({ s: "mp", aid, malId, ep: epNum, type: t });
-                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, intro: r.intro || null, outro: r.outro || null };
+                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, tracks: (r.tracks || []).filter(tr => tr.kind === "captions").map(tr => ({ file: tr.file, label: tr.label || "English", default: tr.default || false })), intro: r.intro || null, outro: r.outro || null };
               }
               return null;
             }));
@@ -2871,6 +2881,7 @@ module.exports = async (req, res) => {
                     }
                     if (cached && cached.m3u8) {
                       entry.m3u8 = cached.m3u8;
+                      entry.tracks = cached.tracks || [];
                       firstDone = true;
                     }
                   } catch {}
