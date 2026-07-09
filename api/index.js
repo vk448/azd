@@ -30,15 +30,33 @@ function decodeHash(hash) {
   }
 }
 
+const anilistCache = new Map();
+const ANILIST_CACHE_TTL = 3600000;
+let anilistLastCall = 0;
 async function anilistQuery(query, variables) {
-  const r = await fetch(ANILIST, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": UA },
-    body: JSON.stringify({ query, variables })
-  });
-  const d = await r.json();
-  if (d.errors) throw new Error(d.errors[0].message);
-  return d.data;
+  const ck = JSON.stringify({ q: query, v: variables });
+  const cached = anilistCache.get(ck);
+  if (cached && Date.now() - cached.ts < ANILIST_CACHE_TTL) return cached.data;
+  const wait = 700 - (Date.now() - anilistLastCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  anilistLastCall = Date.now();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch(ANILIST, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": UA },
+      body: JSON.stringify({ query, variables })
+    });
+    if (r.status === 429) {
+      const retryAfter = parseInt(r.headers.get("retry-after") || "5");
+      await new Promise(res => setTimeout(res, retryAfter * 1000));
+      continue;
+    }
+    const d = await r.json();
+    if (d.errors) throw new Error(d.errors[0].message);
+    anilistCache.set(ck, { ts: Date.now(), data: d.data });
+    return d.data;
+  }
+  throw new Error("AniList rate limited");
 }
 
 function slugify(t) {
