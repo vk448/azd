@@ -3,7 +3,8 @@ const AJAX = "https://9anime.org.lv/wp-admin/admin-ajax.php";
 const JIKAN = "https://api.jikan.moe/v4";
 const ANILIST = "https://graphql.anilist.co";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-const PROXY_BASE = (typeof process !== "undefined" && process.env && process.env.PROXY_BASE) || "";
+const { spawn } = require("child_process");
+const PROXY_BASE = process.env.PROXY_BASE || "";
 
 function stableHash(...parts) {
   let h = 0;
@@ -18,55 +19,26 @@ function stableHash(...parts) {
 }
 
 function encodeHash(obj) {
-  return btoa(JSON.stringify(obj)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return Buffer.from(JSON.stringify(obj)).toString("base64url");
 }
 
 function decodeHash(hash) {
   try {
-    const padded = hash.replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(escape(atob(padded)));
-    return JSON.parse(json);
+    return JSON.parse(Buffer.from(hash, "base64url").toString("utf8"));
   } catch {
     return null;
   }
 }
 
-// AniList cache + throttle — avoid 429 rate limits
-const anilistCache = new Map();
-const ANILIST_CACHE_TTL = 3600000; // 1 hour
-let anilistLastCall = 0;
-const ANILIST_THROTTLE_MS = 700; // ~85 req/min (limit is 90)
-
 async function anilistQuery(query, variables) {
-  // Cache key based on query + variables
-  const cacheKey = JSON.stringify({ q: query, v: variables });
-  const cached = anilistCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < ANILIST_CACHE_TTL) return cached.data;
-
-  // Throttle — wait if needed
-  const now = Date.now();
-  const wait = ANILIST_THROTTLE_MS - (now - anilistLastCall);
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  anilistLastCall = Date.now();
-
-  // Fetch with retry on 429
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const r = await fetch(ANILIST, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": UA },
-      body: JSON.stringify({ query, variables })
-    });
-    if (r.status === 429) {
-      const retryAfter = parseInt(r.headers.get("retry-after") || "5");
-      await new Promise(res => setTimeout(res, retryAfter * 1000));
-      continue;
-    }
-    const d = await r.json();
-    if (d.errors) throw new Error(d.errors[0].message);
-    anilistCache.set(cacheKey, { ts: Date.now(), data: d.data });
-    return d.data;
-  }
-  throw new Error("AniList API rate limited after retries");
+  const r = await fetch(ANILIST, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": UA },
+    body: JSON.stringify({ query, variables })
+  });
+  const d = await r.json();
+  if (d.errors) throw new Error(d.errors[0].message);
+  return d.data;
 }
 
 function slugify(t) {
@@ -238,28 +210,19 @@ ${SHARED_BG}
 @keyframes scaleIn{from{transform:scale(0.5);opacity:0}to{transform:scale(1);opacity:1}}
 .etitle{font-size:22px;font-weight:800;margin-bottom:10px;color:#fff}
 .emsg{font-size:14px;color:rgba(255,255,255,0.45);line-height:1.6;margin-bottom:28px}
+.ehint{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,rgba(255,60,47,0.1),rgba(255,170,0,0.05));border:1px solid rgba(255,60,47,0.2);border-radius:12px;padding:12px 20px;font-size:13px;color:#ff6b35;font-weight:600;text-decoration:none;transition:all .3s}
+.ehint:hover{background:rgba(255,60,47,0.2);border-color:rgba(255,170,0,0.35);transform:translateY(-2px)}
 </style></head><body>
 <div class="animated-bg"></div>
 <div class="cpage">
 <div class="clogo"><div class="logo-icon"><i class="fas fa-bolt"></i></div><span class="logo-text">AnimeZilla</span></div>
 <div class="ecard">
 <div class="eicon"><i class="fas fa-exclamation-triangle"></i></div>
-<h1 class="etitle">Stream Unavailable</h1>
+<h1 class="etitle">Oops! Something went wrong</h1>
 <p class="emsg">${msg}</p>
+<a href="https://animezilla.vercel.app" class="ehint"><i class="fas fa-arrow-left"></i> Back to Website</a>
 </div>
 </div>
-</body></html>`;
-}
-
-function renderMegaPlayFallback(id, ep, lang, idType) {
-  const endpoint = idType === 'ani' ? 'ani' : 'mal';
-  const url = `https://megaplay.buzz/stream/${endpoint}/${id}/${ep}/${lang || 'sub'}`;
-  return `<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>AnimeZilla Player</title>
-<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}iframe{width:100%;height:100%;border:none}</style>
-</head><body>
-<iframe src="${url}" width="100%" height="100%" allowfullscreen></iframe>
 </body></html>`;
 }
 
@@ -647,7 +610,7 @@ body{font-family:'Inter',sans-serif;background:#0f0f0f;color:#fff;min-height:100
 </div>
 
 <div class="info-bar">
-<div class="info-title">${name} — Season ${season}, Episode ${ep}</div>
+<div class="info-title">${name} ÔÇö Season ${season}, Episode ${ep}</div>
 <div class="dl-buttons">
 <a href="${subUrl}" target="_blank" rel="noopener" class="dl-btn sub"><i class="fas fa-external-link-alt"></i> Source</a>
 <button class="dl-btn dub" onclick="downloadVideo()"><i class="fas fa-download"></i> Download</button>
@@ -1007,7 +970,7 @@ const hashStore = new Map();
 const m3u8Store = new Map();
 const akLookup = new Map();
 
-// TTL cache: key -> { data, ts } — 10 min expiry
+// TTL cache: key -> { data, ts } ÔÇö 10 min expiry
 const streamCache = new Map();
 const CACHE_TTL = 600000;
 function cacheGet(key) {
@@ -1123,11 +1086,33 @@ function nodeFetch(url, headers, redirectCount) {
 }
 
 function directFetch(url, headers, redirectCount) {
-  return fetch(url, { headers: { ...headers }, redirect: "follow" })
-    .then(async (r) => {
-      const data = await r.text();
-      return { ok: r.ok, status: r.status, text: () => data, json: () => { try { return JSON.parse(data); } catch { return {}; } } };
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === "https:" ? require("https") : require("http");
+    const opts = {
+      hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80),
+      path: u.pathname + u.search, method: "GET",
+      headers: { ...headers }, rejectUnauthorized: false,
+    };
+    const req = mod.request(opts, (res) => {
+      if ((res.statusCode === 301 || res.statusCode === 302) && redirectCount > 0) {
+        const location = res.headers.location;
+        if (location) {
+          const absUrl = location.startsWith("http") ? location : new URL(location, url).href;
+          resolve(directFetch(absUrl, headers, redirectCount - 1));
+          return;
+        }
+      }
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: () => data, json: () => JSON.parse(data) });
+      });
     });
+    req.on("error", reject);
+    req.setTimeout(20000, () => { req.destroy(); reject(new Error("timeout")); });
+    req.end();
+  });
 }
 
 async function proxyFetch(url, headers, redirectCount) {
@@ -1368,7 +1353,7 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
   <video id="vid" preload="auto" playsinline crossorigin>${trackTags}</video>
   <div class="spinner" id="spin"></div>
   <div class="cplay" id="cplay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
-  <button class="skipbtn" id="skipbtn">SKIP INTRO ▶</button>
+  <button class="skipbtn" id="skipbtn">SKIP INTRO ÔûÂ</button>
   <div class="ctrls" id="ctrls">
     <div class="pbar-wrap" id="pbarWrap">
       <div class="pbar"><div class="pbar-buf" id="buf"></div><div class="pbar-fill" id="fill"></div><div class="pbar-dot" id="dot"></div></div>
@@ -1473,9 +1458,9 @@ vid.ontimeupdate=function(){if(!vid.duration)return;var p=(vid.currentTime/vid.d
 vid.onprogress=function(){if(vid.buffered.length>0)buf.style.width=(vid.buffered.end(vid.buffered.length-1)/vid.duration)*100+'%'};
 
 var swiping=false,swipeStartX=0,swipeStartTime=0;
-function seekFromEvent(clientX){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
+function seekFromEvent(clientX){var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
 pbarWrap.onclick=function(e){e.stopPropagation();seekFromEvent(e.clientX);startHide()};
-pbarWrap.onmousemove=function(e){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
+pbarWrap.onmousemove=function(e){var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
 pbarWrap.addEventListener('touchstart',function(e){e.preventDefault();touchSeeking=true;pbarWrap.classList.add('touching');var t=e.touches[0];seekFromEvent(t.clientX);startHide()},{passive:false});
 pbarWrap.addEventListener('touchmove',function(e){e.preventDefault();if(!touchSeeking)return;var t=e.touches[0];seekFromEvent(t.clientX);var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(t.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=Math.max(0,Math.min(r.width,t.clientX-r.left))+'px'},{passive:false});
 pbarWrap.addEventListener('touchend',function(e){touchSeeking=false;pbarWrap.classList.remove('touching');startHide()});
@@ -1639,7 +1624,7 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
 </style></head><body>
 <div class="topbar" id="topbar">
   <a class="back" href="javascript:history.back()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Back</a>
-  <div class="ep-title">${titleClean} — EP ${epNum}</div>
+  <div class="ep-title">${titleClean} ÔÇö EP ${epNum}</div>
   <div class="type-badge">SUB</div>
 </div>
 <div class="player-wrap">
@@ -1647,7 +1632,7 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
   <video id="vid" preload="auto" playsinline crossorigin>${trackTags}</video>
   <div class="spinner" id="spin"></div>
   <div class="cplay" id="cplay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
-  <button class="skipbtn" id="skipbtn">SKIP INTRO ▶</button>
+  <button class="skipbtn" id="skipbtn">SKIP INTRO ÔûÂ</button>
   <div class="ctrls" id="ctrls">
     <div class="pbar-wrap" id="pbarWrap">
       <div class="pbar"><div class="pbar-buf" id="buf"></div><div class="pbar-fill" id="fill"></div><div class="pbar-dot" id="dot"></div></div>
@@ -1680,8 +1665,8 @@ video::cue{background:rgba(0,0,0,0.7)!important;color:#fff!important;font-size:1
 </div>
 <div class="info"><h1>${titleClean}</h1><div class="meta"><span>Episode ${epNum}</span>${intro ? `<span>Skip intro available</span>` : ""}</div></div>
 <div class="nav">
-  <a href="/api/player/${malId}/${epNum - 1}" class="${epNum <= 1 ? 'disabled' : ''}">← Previous Episode</a>
-  <a href="/api/player/${malId}/${epNum + 1}">Next Episode →</a>
+  <a href="/api/player/${malId}/${epNum - 1}" class="${epNum <= 1 ? 'disabled' : ''}">ÔåÉ Previous Episode</a>
+  <a href="/api/player/${malId}/${epNum + 1}">Next Episode ÔåÆ</a>
 </div>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
@@ -1772,9 +1757,9 @@ vid.ontimeupdate=function(){
 vid.onprogress=function(){if(vid.buffered.length>0)buf.style.width=(vid.buffered.end(vid.buffered.length-1)/vid.duration)*100+'%'};
 
 var swiping=false,swipeStartX=0,swipeStartTime=0;
-function seekFromEvent(clientX){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
+function seekFromEvent(clientX){var r=pbarWrap.getBoundingClientRect();vid.currentTime=Math.max(0,Math.min(vid.duration,((clientX-r.left)/r.width)*vid.duration))}
 pbarWrap.onclick=function(e){e.stopPropagation();seekFromEvent(e.clientX);startHide()};
-pbarWrap.onmousemove=function(e){if(!isFinite(vid.duration))return;var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
+pbarWrap.onmousemove=function(e){var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=(e.clientX-r.left)+'px'};
 pbarWrap.addEventListener('touchstart',function(e){e.preventDefault();touchSeeking=true;pbarWrap.classList.add('touching');var t=e.touches[0];seekFromEvent(t.clientX);startHide()},{passive:false});
 pbarWrap.addEventListener('touchmove',function(e){e.preventDefault();if(!touchSeeking)return;var t=e.touches[0];seekFromEvent(t.clientX);var r=pbarWrap.getBoundingClientRect();var p=Math.max(0,Math.min(1,(t.clientX-r.left)/r.width));tip.textContent=fTime(p*vid.duration);tip.style.left=Math.max(0,Math.min(r.width,t.clientX-r.left))+'px'},{passive:false});
 pbarWrap.addEventListener('touchend',function(e){touchSeeking=false;pbarWrap.classList.remove('touching');startHide()});
@@ -1828,11 +1813,11 @@ function fTime(s){if(!s||isNaN(s))return'0:00';var m=Math.floor(s/60);var sec=Ma
 })();
 </script></body></html>`;
 }
-export default async (req, res) => {
+module.exports = async (req, res) => {
   const ERR_MSG = "Invalid or non-existent MAL ID. Please check the MAL ID and try again.";
   const ERR_404 = "This anime was not found on our source. It may not have episodes uploaded yet.";
 
-  // CORS headers — allow all origins
+  // CORS - allow all origins
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
@@ -1884,7 +1869,7 @@ export default async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.send(new Uint8Array(buffer));
+        return res.send(Buffer.from(buffer));
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1933,7 +1918,7 @@ export default async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.send(new Uint8Array(buffer));
+        return res.send(Buffer.from(buffer));
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1996,7 +1981,7 @@ export default async (req, res) => {
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=3600");
 
-        const buffer = new Uint8Array(await r.arrayBuffer());
+        const buffer = Buffer.from(await r.arrayBuffer());
         return res.send(buffer);
       } catch (e) {
         return res.status(500).json({ error: "Segment error: " + e.message });
@@ -2290,24 +2275,6 @@ export default async (req, res) => {
     if (azEmbed) {
       const slug = azEmbed[1];
       const ep = parseInt(azEmbed[2]);
-      const preloaded = url.searchParams.get("m3u8");
-      if (preloaded) {
-        const ck = `az:${ep}:${slug}`;
-        let cached = cacheGet(ck);
-        let tracks = cached?.tracks || [];
-        // Cache miss — re-fetch from AniZone
-        if (!cached) {
-          try {
-            const html = await anizoneFetchEpisode(slug, ep);
-            const data = anizoneParseEpisode(html, slug, ep);
-            tracks = data.tracks || [];
-            cacheSet(ck, { m3u8: data.videoUrl, tracks });
-          } catch (_) {}
-        }
-        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
-          renderEmbedOnly(preloaded, tracks, "AniZone EP" + ep, null, null)
-        );
-      }
       try {
         const html = await anizoneFetchEpisode(slug, ep);
         const data = anizoneParseEpisode(html, slug, ep);
@@ -2337,7 +2304,7 @@ export default async (req, res) => {
 
     // ====== AniKage Routes ======
 
-    // GET /api/ak/servers/:anilist_id/episode/:num — available servers
+    // GET /api/ak/servers/:anilist_id/episode/:num ÔÇö available servers
     const akServers = path.match(/^\/api\/ak\/servers\/(\d+)\/episode\/(\d+)$/);
     if (akServers) {
       const aid = parseInt(akServers[1]);
@@ -2350,7 +2317,7 @@ export default async (req, res) => {
       }
     }
 
-    // GET /api/ak/sources/:anilist_id/episode/:num?server=neko&type=sub — sources with m3u8
+    // GET /api/ak/sources/:anilist_id/episode/:num?server=neko&type=sub ÔÇö sources with m3u8
     const akSources = path.match(/^\/api\/ak\/sources\/(\d+)\/episode\/(\d+)$/);
     if (akSources) {
       const aid = parseInt(akSources[1]);
@@ -2381,7 +2348,7 @@ export default async (req, res) => {
       }
     }
 
-    // GET /api/ak/extract/:anilist_id/episode/:num — full auto-extract (uses best server)
+    // GET /api/ak/extract/:anilist_id/episode/:num ÔÇö full auto-extract (uses best server)
     const akExtract = path.match(/^\/api\/ak\/extract\/(\d+)\/episode\/(\d+)$/);
     if (akExtract) {
       const aid = parseInt(akExtract[1]);
@@ -2402,7 +2369,7 @@ export default async (req, res) => {
       }
     }
 
-    // GET /api/ak/embed/:hash — embed player page for AniKage (self-contained hash)
+    // GET /api/ak/embed/:hash ÔÇö embed player page for AniKage (self-contained hash)
     const akEmbedHash = path.match(/^\/api\/ak\/embed\/([a-zA-Z0-9_-]+)$/);
     if (akEmbedHash) {
       const hash = akEmbedHash[1];
@@ -2412,39 +2379,12 @@ export default async (req, res) => {
       }
       const preloaded = url.searchParams.get("m3u8");
       if (preloaded) {
-        const ck = `ak:${ent.aid}:${ent.ep}:${ent.server}:${ent.type}`;
-        let cached = cacheGet(ck);
-        let tracks = cached?.tracks || [];
-        let intro = cached?.intro || null;
-        let outro = cached?.outro || null;
-        // Cache miss (serverless cold start) — re-fetch tracks from AniKage
-        if (!cached) {
-          try {
-            const sources = await anikageGetSources(ent.aid, ent.ep, ent.server, ent.type);
-            let m3u8 = null;
-            for (const src of sources.sources || []) {
-              const dec = anikageDecrypt(src.url);
-              if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
-            }
-            if (m3u8) {
-              tracks = (sources.subtitles || []).map(t => {
-                let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
-                if (!subUrl) subUrl = anikageDecrypt(t.file);
-                if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
-                return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
-              }).filter(t => t.file);
-              intro = sources.intro || null;
-              outro = sources.outro || null;
-              cacheSet(ck, { m3u8, tracks, intro, outro });
-            }
-          } catch (_) {}
-        }
         try {
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(
-            renderEmbedOnly(preloaded, tracks, "EP" + ent.ep, intro, outro)
+            renderEmbedOnly(preloaded, [], "EP" + ent.ep, null, null)
           );
         } catch (e) {
-          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(ent.aid, ent.ep, ent.type, 'ani'));
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
         }
       }
       const ck = `ak:${ent.aid}:${ent.ep}:${ent.server}:${ent.type}`;
@@ -2471,11 +2411,11 @@ export default async (req, res) => {
           renderEmbedOnly(cached.m3u8, cached.tracks, "EP" + ent.ep, cached.intro, cached.outro)
         );
       } catch (e) {
-        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(ent.aid, ent.ep, ent.type, 'ani'));
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
       }
     }
 
-    // GET /api/ak/embed/:anilist_id/episode/:num — embed player page for AniKage (legacy)
+    // GET /api/ak/embed/:anilist_id/episode/:num ÔÇö embed player page for AniKage (legacy)
     const akEmbed = path.match(/^\/api\/ak\/embed\/(\d+)\/episode\/(\d+)$/);
     if (akEmbed) {
       const aid = parseInt(akEmbed[1]);
@@ -2487,7 +2427,7 @@ export default async (req, res) => {
           renderEmbedOnly(data.videoUrl, data.tracks, "EP" + ep, data.intro, data.outro)
         );
       } catch (e) {
-        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(aid, ep, audioType, 'ani'));
+        return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("AniKage: " + e.message));
       }
     }
 
@@ -2606,7 +2546,7 @@ export default async (req, res) => {
       return res.redirect(`/api/watch/${mid}/${detectedSeason}/${ep}`);
     }
 
-    // Anime Watch API: /api/anime-watch/:mal_id/:episode → returns sub/dub hashes
+    // Anime Watch API: /api/anime-watch/:mal_id/:episode ÔåÆ returns sub/dub hashes
     const animeWatchMatch = path.match(/^\/api\/anime-watch\/(\d+)\/(\d+)$/);
     if (animeWatchMatch) {
       const mid = parseInt(animeWatchMatch[1]);
@@ -2629,7 +2569,7 @@ export default async (req, res) => {
       return res.send(JSON.stringify(results));
     }
 
-    // Watch Embed: /api/watch-embed/:hash → serves the player page
+    // Watch Embed: /api/watch-embed/:hash ÔåÆ serves the player page
     const watchEmbedMatch = path.match(/^\/api\/watch-embed\/(.+)$/);
     if (watchEmbedMatch) {
       const hash = watchEmbedMatch[1];
@@ -2637,28 +2577,11 @@ export default async (req, res) => {
       // Fast path: if pre-fetched m3u8 URL provided, use directly (no upstream fetch)
       const preloaded = url.searchParams.get("m3u8");
       if (preloaded && decoded && decoded.s === "mp") {
-        const ck = `mp:${decoded.malId}:${decoded.ep}:${decoded.type}`;
-        let cached = cacheGet(ck);
-        let tracks = cached?.tracks || [];
-        let intro = cached?.intro || null;
-        let outro = cached?.outro || null;
-        // Cache miss (serverless cold start) — re-fetch tracks from MegaPlay
-        if (!cached && decoded.malId) {
-          try {
-            const r = await extractMegaPlayByMal(decoded.malId, decoded.ep, decoded.type);
-            if (r && r.m3u8) {
-              cacheSet(ck, r);
-              tracks = r.tracks || [];
-              intro = r.intro || null;
-              outro = r.outro || null;
-            }
-          } catch (_) {}
-        }
         try {
-          const html = renderEmbedOnly(preloaded, tracks, "EP" + decoded.ep, intro, outro);
+          const html = renderEmbedOnly(preloaded, [], "EP" + decoded.ep, null, null);
           return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(html);
         } catch (e) {
-          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(decoded.malId || decoded.aid, decoded.ep, decoded.type, decoded.malId ? 'mal' : 'ani'));
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("MegaPlay: " + e.message));
         }
       }
       if (decoded && decoded.s === "mp") {
@@ -2675,7 +2598,7 @@ export default async (req, res) => {
           }
           return res.status(404).json({ error: "Episode not available" });
         } catch (e) {
-          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayFallback(decoded.malId || decoded.aid, decoded.ep, decoded.type, decoded.malId ? 'mal' : 'ani'));
+          return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("MegaPlay: " + e.message));
         }
       }
       const data = hashStore.get(hash);
@@ -2887,57 +2810,52 @@ export default async (req, res) => {
           }
         }
 
-        // 2) AniZone (pre-fetch m3u8 + tracks for instant playback)
+        // 2) AniZone
         if (title) {
           try {
             const az = await anizoneExtract(title, epNum);
-            if (az && az.videoUrl) {
-              const ck = `az:${epNum}:${az.slug}`;
-              cacheSet(ck, { m3u8: az.videoUrl, tracks: az.tracks || [] });
-              result.sources.push({ source: "anizone", label: "AniZone", slug: az.slug, embedUrl: `/api/az/embed/${az.slug}/${epNum}`, m3u8: az.videoUrl });
-            }
+            result.sources.push({ source: "anizone", label: "AniZone", slug: az.slug, embedUrl: `/api/az/embed/${az.slug}/${epNum}` });
           } catch {}
         }
 
-        // 3) AniKage (pre-fetch ALL servers in parallel for instant playback)
+        // 3) AniKage (pre-fetch first server for instant playback, list rest for fallback)
         try {
           const serversData = await anikageGetServers(aid, epNum);
-          const allPairs = [];
+          let firstDone = false;
           for (const sv of serversData.servers || []) {
             for (const st of (sv.subTypes || ["sub"])) {
-              allPairs.push({ sv, st });
-            }
-          }
-          const akResults = await Promise.allSettled(allPairs.map(async ({ sv, st }) => {
-            const h = encodeHash({ s: "ak", aid, ep: epNum, server: sv.id, type: st });
-            const entry = { source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` };
-            try {
-              const ck = `ak:${aid}:${epNum}:${sv.id}:${st}`;
-              let cached = cacheGet(ck);
-              if (!cached) {
-                const src = await anikageGetSources(aid, epNum, sv.id, st);
-                let m3u8 = null;
-                for (const s of src.sources || []) {
-                  const dec = anikageDecrypt(s.url);
-                  if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
-                }
-                if (m3u8) {
-                  const tracks = (src.subtitles || []).map(t => {
-                    let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
-                    if (!subUrl) subUrl = anikageDecrypt(t.file);
-                    if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
-                    return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
-                  }).filter(t => t.file);
-                  cached = { m3u8, tracks, intro: src.intro || null, outro: src.outro || null };
-                  cacheSet(ck, cached);
-                }
+              const h = encodeHash({ s: "ak", aid, ep: epNum, server: sv.id, type: st });
+              const entry = { source: "anikage", label: (sv.label || sv.id) + " " + st.toUpperCase(), server: sv.id, type: st, embedUrl: `/api/ak/embed/${h}` };
+              if (!firstDone) {
+                try {
+                  const ck = `ak:${aid}:${epNum}:${sv.id}:${st}`;
+                  let cached = cacheGet(ck);
+                  if (!cached) {
+                    const src = await anikageGetSources(aid, epNum, sv.id, st);
+                    let m3u8 = null;
+                    for (const s of src.sources || []) {
+                      const dec = anikageDecrypt(s.url);
+                      if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+                    }
+                    if (m3u8) {
+                      const tracks = (src.subtitles || []).map(t => {
+                        let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+                        if (!subUrl) subUrl = anikageDecrypt(t.file);
+                        if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+                        return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
+                      }).filter(t => t.file);
+                      cached = { m3u8, tracks, intro: src.intro || null, outro: src.outro || null };
+                      cacheSet(ck, cached);
+                    }
+                  }
+                  if (cached && cached.m3u8) {
+                    entry.m3u8 = cached.m3u8;
+                    firstDone = true;
+                  }
+                } catch {}
               }
-              if (cached && cached.m3u8) entry.m3u8 = cached.m3u8;
-            } catch {}
-            return entry;
-          }));
-          for (const r of akResults) {
-            if (r.status === "fulfilled") result.sources.push(r.value);
+              result.sources.push(entry);
+            }
           }
         } catch {}
 
