@@ -1352,7 +1352,7 @@ video::cue{background:rgba(0,0,0,0.85)!important;color:#fff!important;font-size:
 .vol-wrap:hover .vol-slider{width:56px}
 .vol-slider input[type=range]{-webkit-appearance:none;width:56px;height:4px;background:rgba(255,255,255,0.1);border-radius:4px;outline:none;cursor:pointer;margin:0 8px}
 .vol-slider input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:#fff;border-radius:50%;cursor:pointer;box-shadow:0 0 14px rgba(229,9,20,0.4)}
-.drop{position:absolute;bottom:54px;background:rgba(14,14,22,0.97);border:1px solid rgba(229,9,20,0.08);border-radius:14px;padding:8px 0;min-width:200px;box-shadow:0 16px 60px rgba(0,0,0,0.7),0 0 40px rgba(229,9,20,0.06);display:none;z-index:20;backdrop-filter:blur(20px)}
+.drop{position:absolute;bottom:54px;background:rgba(14,14,22,0.97);border:1px solid rgba(229,9,20,0.08);border-radius:14px;padding:8px 0;min-width:200px;max-height:360px;overflow-y:auto;box-shadow:0 16px 60px rgba(0,0,0,0.7),0 0 40px rgba(229,9,20,0.06);display:none;z-index:20;backdrop-filter:blur(20px)}
 .drop.open{display:block;animation:dropIn .2s ease}
 @keyframes dropIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .drop-hdr{font-size:11px;font-weight:700;color:var(--red);padding:8px 16px 6px;letter-spacing:.6px;text-transform:uppercase;text-shadow:0 0 10px rgba(229,9,20,0.2)}
@@ -1599,7 +1599,7 @@ video::cue{background:rgba(0,0,0,0.85)!important;color:#fff!important;font-size:
 .vol-wrap:hover .vol-slider{width:56px}
 .vol-slider input[type=range]{-webkit-appearance:none;width:56px;height:4px;background:rgba(255,255,255,0.1);border-radius:4px;outline:none;cursor:pointer;margin:0 8px}
 .vol-slider input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:#fff;border-radius:50%;cursor:pointer;box-shadow:0 0 14px rgba(229,9,20,0.4)}
-.drop{position:absolute;bottom:54px;background:rgba(14,14,22,0.97);border:1px solid rgba(229,9,20,0.08);border-radius:14px;padding:8px 0;min-width:200px;box-shadow:0 16px 60px rgba(0,0,0,0.7),0 0 40px rgba(229,9,20,0.06);display:none;z-index:20;backdrop-filter:blur(20px)}
+.drop{position:absolute;bottom:54px;background:rgba(14,14,22,0.97);border:1px solid rgba(229,9,20,0.08);border-radius:14px;padding:8px 0;min-width:200px;max-height:360px;overflow-y:auto;box-shadow:0 16px 60px rgba(0,0,0,0.7),0 0 40px rgba(229,9,20,0.06);display:none;z-index:20;backdrop-filter:blur(20px)}
 .drop.open{display:block;animation:dropIn .2s ease}
 @keyframes dropIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .drop-hdr{font-size:11px;font-weight:700;color:var(--red);padding:8px 16px 6px;letter-spacing:.6px;text-transform:uppercase;text-shadow:0 0 10px rgba(229,9,20,0.2)}
@@ -2779,7 +2779,7 @@ module.exports = async (req, res) => {
           return res.status(200).json({
             success: true, source: "megaplay", anilistId: aid, malId, title, episode: epNum, type: audioType,
             hash, embedUrl: `/api/watch-embed/${hash}`, m3u8: result.m3u8, intro: result.intro || null, outro: result.outro || null,
-            tracks: (result.tracks || []).filter(t => t.kind === "captions").map(t => ({ file: t.file, label: t.label || "English", default: t.default || false }))
+            tracks: (result.tracks || []).filter(t => t.kind === "captions" || t.kind === "subtitles").map(t => ({ file: t.file, label: t.label || "English", default: t.default || false }))
           });
         }
 
@@ -2801,7 +2801,7 @@ module.exports = async (req, res) => {
               }
               if (r && r.m3u8) {
                 const h = encodeHash({ s: "mp", aid, malId, ep: epNum, type: t });
-                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, tracks: (r.tracks || []).filter(tr => tr.kind === "captions").map(tr => ({ file: tr.file, label: tr.label || "English", srclang: tr.srclang || tr.lang || detectLangCode(tr.label || ""), default: tr.default || false })), intro: r.intro || null, outro: r.outro || null };
+                return { source: "megaplay", label: t.toUpperCase(), embedUrl: `/api/watch-embed/${h}`, m3u8: r.m3u8, tracks: (r.tracks || []).filter(tr => tr.kind === "captions" || tr.kind === "subtitles").map(tr => ({ file: tr.file, label: tr.label || "English", srclang: tr.srclang || tr.lang || detectLangCode(tr.label || ""), default: tr.default || false })), intro: r.intro || null, outro: r.outro || null };
               }
               return null;
             }));
