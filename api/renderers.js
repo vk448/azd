@@ -1,5 +1,5 @@
 ﻿const config = require("./config");
-const { stableHash, detectLangCode } = require("./utils");
+const { stableHash, detectLangCode, encodeHash } = require("./utils");
 const { m3u8Set } = require("./config");
 
 let TVDB_TOKEN=null,TVDB_TOKEN_TIME=0;
@@ -755,11 +755,9 @@ function filterEps(){
 
 
 function renderEmbedOnly(m3u8Url, tracks, title, intro, outro, existingHash, malId) {
-  const hash = existingHash || stableHash("eo", m3u8Url);
-  if (!existingHash) m3u8Set(hash, m3u8Url);
+  const hash = existingHash || encodeHash({u: m3u8Url});
   const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
-    const th = stableHash("tr", t.file);
-    m3u8Set(th, t.file);
+    const th = encodeHash({u: t.file});
     const lang = t.srclang || "en";
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
@@ -991,11 +989,9 @@ function showToast(m){toastEl.textContent=m;toastEl.classList.add('show');setTim
 </script></body></html>`;
 }
 function renderMegaPlayer(m3u8Url, tracks, title, intro, outro, malId, epNum) {
-  const hash = stableHash("mp", m3u8Url);
-  m3u8Set(hash, m3u8Url);
+  const hash = encodeHash({u: m3u8Url});
   const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
-    const th = stableHash("tr", t.file);
-    m3u8Set(th, t.file);
+    const th = encodeHash({u: t.file});
     const lang = t.srclang || "en";
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
@@ -1263,11 +1259,9 @@ function showToast(m){toastEl.textContent=m;toastEl.classList.add('show');setTim
 
 
 function renderMegaPlayer(m3u8Url, tracks, title, intro, outro, malId, epNum) {
-  const hash = stableHash("mp", m3u8Url);
-  m3u8Set(hash, m3u8Url);
+  const hash = encodeHash({u: m3u8Url});
   const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
-    const th = stableHash("tr", t.file);
-    m3u8Set(th, t.file);
+    const th = encodeHash({u: t.file});
     const lang = t.srclang || "en";
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");

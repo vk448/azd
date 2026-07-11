@@ -41,7 +41,7 @@ module.exports = async (req, res) => {
   // CORS - allow all origins
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Range, Origin");
   if (req.method === "OPTIONS") return res.status(204).end();
 
   try {
@@ -49,12 +49,20 @@ module.exports = async (req, res) => {
     const path = url.pathname.replace(/\/+$/, "");
 
     // Secure m3u8 Proxy (hides real URL via token): /api/mpxs/{hash}
-    const mpxsMatch = path.match(/^\/api\/mpxs\/(\w+)$/);
+    const mpxsMatch = path.match(/^\/api\/mpxs\/([\w-]+)$/);
     if (mpxsMatch) {
       const hash = mpxsMatch[1];
-      const entry = m3u8Get(hash);
-      if (!entry) return res.status(404).json({ error: "Invalid or expired token" });
-      const targetUrl = typeof entry === 'string' ? entry : entry.url;
+      let targetUrl = null;
+      // Stateless mode: decode base64url-encoded URL from hash
+      const decoded = decodeHash(hash);
+      if (decoded && decoded.u) {
+        targetUrl = decoded.u;
+      } else {
+        // Stateful fallback: look up hash in store
+        const entry = m3u8Get(hash);
+        if (!entry) return res.status(404).json({ error: "Invalid or expired token" });
+        targetUrl = typeof entry === 'string' ? entry : entry.url;
+      }
       const targetOrigin = (() => { try { return new URL(targetUrl).origin; } catch { return ""; } })();
       const proxyHeaders = {
         "User-Agent": UA,
@@ -62,6 +70,7 @@ module.exports = async (req, res) => {
         "Origin": targetOrigin,
         "Accept": "*/*"
       };
+      if (req.headers.range) proxyHeaders["Range"] = req.headers.range;
       try {
         const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
@@ -73,16 +82,14 @@ module.exports = async (req, res) => {
           const rewritten = body.replace(/^(?!#)([^\s].+)$/gm, (line) => {
             const abs = absUrl(line, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = stableHash("p", abs);
-              m3u8Set(h, abs);
+              const h = encodeHash({u: abs});
               return "/api/mpxs/" + h;
             }
             return "/api/mpxy?url=" + encodeURIComponent(abs);
           }).replace(/URI="([^"]+)"/g, (match, uri) => {
             const abs = absUrl(uri, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = stableHash("p", abs);
-              m3u8Set(h, abs);
+              const h = encodeHash({u: abs});
               return 'URI="/api/mpxs/' + h + '"';
             }
             return 'URI="/api/mpxy?url=' + encodeURIComponent(abs) + '"';
@@ -95,7 +102,12 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+        const cr = r.headers.get("content-range");
+        if (cr) res.setHeader("Content-Range", cr);
+        const ar = r.headers.get("accept-ranges");
+        if (ar) res.setHeader("Accept-Ranges", ar);
         const buffer = Buffer.from(await r.arrayBuffer());
+        res.statusCode = r.status;
         return res.send(buffer);
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
@@ -115,6 +127,7 @@ module.exports = async (req, res) => {
         "Origin": targetOrigin,
         "Accept": "*/*"
       };
+      if (req.headers.range) proxyHeaders["Range"] = req.headers.range;
       try {
         const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
@@ -127,16 +140,14 @@ module.exports = async (req, res) => {
           const rewritten = body.replace(/^(?!#)([^\s].+)$/gm, (line) => {
             const abs = absUrl(line, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = stableHash("p", abs);
-              m3u8Set(h, abs);
+              const h = encodeHash({u: abs});
               return "/api/mpxs/" + h;
             }
             return "/api/mpxy?url=" + encodeURIComponent(abs);
           }).replace(/URI="([^"]+)"/g, (match, uri) => {
             const abs = absUrl(uri, targetUrl, base);
             if (abs.includes(".m3u8")) {
-              const h = stableHash("p", abs);
-              m3u8Set(h, abs);
+              const h = encodeHash({u: abs});
               return 'URI="/api/mpxs/' + h + '"';
             }
             return 'URI="/api/mpxy?url=' + encodeURIComponent(abs) + '"';
@@ -150,7 +161,12 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+        const cr = r.headers.get("content-range");
+        if (cr) res.setHeader("Content-Range", cr);
+        const ar = r.headers.get("accept-ranges");
+        if (ar) res.setHeader("Accept-Ranges", ar);
         const buffer = Buffer.from(await r.arrayBuffer());
+        res.statusCode = r.status;
         return res.send(buffer);
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
@@ -521,8 +537,7 @@ module.exports = async (req, res) => {
       try {
         const html = await anizoneFetchEpisode(slug, ep);
         const data = anizoneParseEpisode(html, slug, ep);
-        const hash = stableHash("az", slug, ep);
-        m3u8Set(hash, data.videoUrl);
+        const hash = encodeHash({u: data.videoUrl});
         return res.status(200).json({
           success: true,
           source: "anizone",
@@ -626,8 +641,7 @@ module.exports = async (req, res) => {
       const audioType = url.searchParams.get("type") || "sub";
       try {
         const data = await anikageExtract(aid, ep, audioType);
-        const hash = stableHash("ak", aid, ep, audioType);
-        m3u8Set(hash, data.videoUrl);
+        const hash = encodeHash({u: data.videoUrl});
         return res.status(200).json({
           success: true, source: "anikage", anilistId: aid, episode: ep, type: audioType,
           server: data.server, hash, m3u8: data.videoUrl,
@@ -1058,8 +1072,7 @@ module.exports = async (req, res) => {
         if (source === "anizone") {
           if (!title) return res.status(400).json({ error: "No title for search" });
           const azResult = await anizoneExtract(title, epNum);
-          const hash = stableHash("az", azResult.videoUrl);
-          m3u8Set(hash, azResult.videoUrl);
+          const hash = encodeHash({u: azResult.videoUrl});
           return res.status(200).json({
             success: true, source: "anizone", anilistId: aid, slug: azResult.slug,
             title: azResult.title, episode: epNum, hash, m3u8: azResult.videoUrl, tracks: azResult.tracks
