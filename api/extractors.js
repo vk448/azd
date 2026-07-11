@@ -158,39 +158,56 @@ function anikageDecrypt(encoded) {
 
 async function anikageExtract(anilistId, episodeNum, audioType) {
   const serversData = await anikageGetServers(anilistId, episodeNum);
-  const preferred = serversData.servers.find(s => s.id === "neko" || s.default) || serversData.servers[0];
-  if (!preferred) throw new Error("No servers available on AniKage");
-  const serverId = preferred.id;
-  const sources = await anikageGetSources(anilistId, episodeNum, serverId, audioType);
+  const servers = serversData.servers || [];
+  if (!servers.length) throw new Error("No servers available on AniKage");
 
-  let m3u8 = null;
-  for (const src of sources.sources || []) {
-    const dec = anikageDecrypt(src.url);
-    if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+  // Sort: neko first, then default, then rest
+  const sorted = [...servers].sort((a, b) => {
+    if (a.id === "neko") return -1;
+    if (b.id === "neko") return 1;
+    if (a.default) return -1;
+    if (b.default) return 1;
+    return 0;
+  });
+
+  let lastErr = null;
+  for (const srv of sorted) {
+    try {
+      const sources = await anikageGetSources(anilistId, episodeNum, srv.id, audioType);
+      let m3u8 = null;
+      for (const src of sources.sources || []) {
+        const dec = anikageDecrypt(src.url);
+        if (dec && dec.includes(".m3u8")) { m3u8 = dec; break; }
+      }
+      if (!m3u8) { lastErr = new Error("No m3u8 on server " + srv.id); continue; }
+
+      const tracks = (sources.subtitles || []).map(t => {
+        let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
+        if (!subUrl) subUrl = anikageDecrypt(t.file);
+        if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+        if (!subUrl) console.warn("AniKage subtitle drop: no valid URL found for", t.label, t.srclang || t.lang);
+        const label = t.label || "English";
+        const srclang = t.srclang || t.lang || detectLangCode(label);
+        return { file: subUrl || "", label, srclang, kind: "captions", default: t.default || false };
+      }).filter(t => t.file);
+
+      return {
+        videoUrl: m3u8,
+        tracks,
+        server: srv.id,
+        servers: servers,
+        embeds: sources.embeds || [],
+        embedOptions: sources.embedOptions || [],
+        intro: sources.intro || null,
+        outro: sources.outro || null,
+        fromScrape: false
+      };
+    } catch (e) {
+      console.warn("AniKage server " + srv.id + " failed:", e.message);
+      lastErr = e;
+    }
   }
-  if (!m3u8) throw new Error("No accessible stream on AniKage");
-
-  const tracks = (sources.subtitles || []).map(t => {
-    let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
-    if (!subUrl) subUrl = anikageDecrypt(t.file);
-    if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
-    if (!subUrl) console.warn("AniKage subtitle drop: no valid URL found for", t.label, t.srclang || t.lang);
-    const label = t.label || "English";
-    const srclang = t.srclang || t.lang || detectLangCode(label);
-    return { file: subUrl || "", label, srclang, kind: "captions", default: t.default || false };
-  }).filter(t => t.file);
-
-  return {
-    videoUrl: m3u8,
-    tracks,
-    server: serverId,
-    servers: serversData.servers || [],
-    embeds: sources.embeds || [],
-    embedOptions: sources.embedOptions || [],
-    intro: sources.intro || null,
-    outro: sources.outro || null,
-    fromScrape: false
-  };
+  throw lastErr || new Error("All AniKage servers failed");
 }
 
 module.exports = {

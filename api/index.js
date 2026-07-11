@@ -458,24 +458,38 @@ module.exports = async (req, res) => {
       const type = url.searchParams.get("type") || "sub";
       try {
         const info = await jikanInfo(mid);
+        const title = info.eng || info.title;
         let result = null;
         let videoUrl = null;
+
+        // Source 1: MegaPlay
         try {
-          result = await extractMegaPlayByMal(mid, ep, type);
-          if (result && result.m3u8) videoUrl = result.m3u8;
-        } catch {}
+          console.log("[player] Trying MegaPlay for", mid, "ep", ep);
+          const mp = await extractMegaPlayByMal(mid, ep, type);
+          if (mp && mp.m3u8) { result = mp; videoUrl = mp.m3u8; console.log("[player] MegaPlay OK"); }
+        } catch (e) { console.log("[player] MegaPlay failed:", e.message); }
+
+        // Source 2: AniZone
         if (!videoUrl) {
           try {
-            const anilistId = await findAnilistIdByTitle(info.eng || info.title, mid);
-            if (anilistId) {
-              const ak = await anikageExtract(anilistId, ep, type);
-              if (ak && ak.videoUrl) {
-                result = { m3u8: ak.videoUrl, tracks: ak.tracks || [], intro: ak.intro || null, outro: ak.outro || null };
-                videoUrl = ak.videoUrl;
-              }
-            }
-          } catch {}
+            console.log("[player] Trying AniZone for", title);
+            const az = await anizoneExtract(title, ep);
+            if (az && az.videoUrl) { result = { m3u8: az.videoUrl, tracks: az.tracks || [], intro: null, outro: null }; videoUrl = az.videoUrl; console.log("[player] AniZone OK"); }
+          } catch (e) { console.log("[player] AniZone failed:", e.message); }
         }
+
+        // Source 3: AniKage (tries all servers internally)
+        if (!videoUrl) {
+          try {
+            const anilistId = await findAnilistIdByTitle(title, mid);
+            if (anilistId) {
+              console.log("[player] Trying AniKage for", anilistId, "ep", ep);
+              const ak = await anikageExtract(anilistId, ep, type);
+              if (ak && ak.videoUrl) { result = { m3u8: ak.videoUrl, tracks: ak.tracks || [], intro: ak.intro || null, outro: ak.outro || null }; videoUrl = ak.videoUrl; console.log("[player] AniKage OK via", ak.server); }
+            } else { console.log("[player] No AniList ID found for", title); }
+          } catch (e) { console.log("[player] AniKage failed:", e.message); }
+        }
+
         if (!videoUrl) throw new Error("No streams available from any source");
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayer(result.m3u8, result.tracks, info.title + " - EP" + ep, result.intro, result.outro, mid, ep));
       } catch (e) {
@@ -491,24 +505,38 @@ module.exports = async (req, res) => {
       const type = url.searchParams.get("type") || "sub";
       try {
         const info = await jikanInfo(mid);
+        const title = info.eng || info.title;
         let result = null;
         let videoUrl = null;
+
+        // Source 1: MegaPlay
         try {
-          result = await extractMegaPlayByMal(mid, ep, type);
-          if (result && result.m3u8) videoUrl = result.m3u8;
-        } catch {}
+          console.log("[player] Trying MegaPlay for", mid, "ep", ep);
+          const mp = await extractMegaPlayByMal(mid, ep, type);
+          if (mp && mp.m3u8) { result = mp; videoUrl = mp.m3u8; console.log("[player] MegaPlay OK"); }
+        } catch (e) { console.log("[player] MegaPlay failed:", e.message); }
+
+        // Source 2: AniZone
         if (!videoUrl) {
           try {
-            const anilistId = await findAnilistIdByTitle(info.eng || info.title, mid);
-            if (anilistId) {
-              const ak = await anikageExtract(anilistId, ep, type);
-              if (ak && ak.videoUrl) {
-                result = { m3u8: ak.videoUrl, tracks: ak.tracks || [], intro: ak.intro || null, outro: ak.outro || null };
-                videoUrl = ak.videoUrl;
-              }
-            }
-          } catch {}
+            console.log("[player] Trying AniZone for", title);
+            const az = await anizoneExtract(title, ep);
+            if (az && az.videoUrl) { result = { m3u8: az.videoUrl, tracks: az.tracks || [], intro: null, outro: null }; videoUrl = az.videoUrl; console.log("[player] AniZone OK"); }
+          } catch (e) { console.log("[player] AniZone failed:", e.message); }
         }
+
+        // Source 3: AniKage (tries all servers internally)
+        if (!videoUrl) {
+          try {
+            const anilistId = await findAnilistIdByTitle(title, mid);
+            if (anilistId) {
+              console.log("[player] Trying AniKage for", anilistId, "ep", ep);
+              const ak = await anikageExtract(anilistId, ep, type);
+              if (ak && ak.videoUrl) { result = { m3u8: ak.videoUrl, tracks: ak.tracks || [], intro: ak.intro || null, outro: ak.outro || null }; videoUrl = ak.videoUrl; console.log("[player] AniKage OK via", ak.server); }
+            } else { console.log("[player] No AniList ID found for", title); }
+          } catch (e) { console.log("[player] AniKage failed:", e.message); }
+        }
+
         if (!videoUrl) throw new Error("No streams available from any source");
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayer(result.m3u8, result.tracks, info.title + " - EP" + ep, result.intro, result.outro, mid, ep));
       } catch (e) {
