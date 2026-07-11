@@ -52,6 +52,35 @@ function prefetchManifestSegments(manifestText, headers) {
   } catch {}
 }
 
+function getProxyHeaders(targetUrl) {
+  if (targetUrl.includes("megaplay.buzz") || targetUrl.includes("mega.buzz"))
+    return MEGAPLAY_HEADERS;
+  if (targetUrl.includes("anizone.to") || targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz"))
+    return ANIZONE_HEADERS;
+  if (targetUrl.includes("anikage.cc"))
+    return ANIKAGE_HEADERS;
+  return { "User-Agent": UA, "Accept": "*/*" };
+}
+
+async function streamResponse(r, res, targetUrl) {
+  const ct = r.headers.get("content-type") || "application/octet-stream";
+  res.setHeader("Content-Type", ct);
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+  const cr = r.headers.get("content-range");
+  if (cr) res.setHeader("Content-Range", cr);
+  const ar = r.headers.get("accept-ranges");
+  if (ar) res.setHeader("Accept-Ranges", ar);
+  try {
+    const buffer = Buffer.from(await r.arrayBuffer());
+    res.statusCode = r.status || 200;
+    res.end(buffer);
+  } catch (err) {
+    console.error("[proxy] Buffer error:", targetUrl, err.message);
+    if (!res.headersSent) res.status(502).json({ error: "Failed to proxy response" });
+  }
+}
+
 module.exports = async (req, res) => {
   const ERR_MSG = "Invalid or non-existent MAL ID. Please check the MAL ID and try again.";
   const ERR_404 = "This anime was not found on our source. It may not have episodes uploaded yet.";
@@ -81,11 +110,9 @@ module.exports = async (req, res) => {
         if (!entry) return res.status(404).json({ error: "Invalid or expired token" });
         targetUrl = typeof entry === 'string' ? entry : entry.url;
       }
-      const targetOrigin = (() => { try { return new URL(targetUrl).origin; } catch { return ""; } })();
-      const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
-      const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
+      const proxyHeaders = getProxyHeaders(targetUrl);
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(15000) });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
@@ -113,23 +140,7 @@ module.exports = async (req, res) => {
           prefetchManifestSegments(rewritten, proxyHeaders);
           return res.send(rewritten);
         }
-        res.setHeader("Content-Type", ct);
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
-        const cr = r.headers.get("content-range");
-        if (cr) res.setHeader("Content-Range", cr);
-        const ar = r.headers.get("accept-ranges");
-        if (ar) res.setHeader("Accept-Ranges", ar);
-        try {
-          const nodeStream = Readable.fromWeb(r.body);
-          nodeStream.on('error', function() {});
-          nodeStream.pipe(res);
-          return;
-        } catch(streamErr) {
-          const buffer = Buffer.from(await r.arrayBuffer());
-          res.statusCode = r.status;
-          return res.send(buffer);
-        }
+        return streamResponse(r, res, targetUrl);
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -141,10 +152,9 @@ module.exports = async (req, res) => {
       if (!targetUrl || !targetUrl.startsWith("http")) {
         return res.status(400).json({ error: "Invalid URL" });
       }
-      const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
-      const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
+      const proxyHeaders = getProxyHeaders(targetUrl);
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(15000) });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
 
@@ -174,25 +184,10 @@ module.exports = async (req, res) => {
           return res.send(rewritten);
         }
 
-        res.setHeader("Content-Type", ct);
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
-        const cr = r.headers.get("content-range");
-        if (cr) res.setHeader("Content-Range", cr);
-        const ar = r.headers.get("accept-ranges");
-        if (ar) res.setHeader("Accept-Ranges", ar);
-        try {
-          const nodeStream = Readable.fromWeb(r.body);
-          nodeStream.on('error', function() {});
-          nodeStream.pipe(res);
-          return;
-        } catch(streamErr) {
-          const buffer = Buffer.from(await r.arrayBuffer());
-          res.statusCode = r.status;
-          return res.send(buffer);
-        }
+        return streamResponse(r, res, targetUrl);
       } catch (e) {
-        return res.status(500).json({ error: "Proxy error: " + e.message });
+        console.error("[proxy] mpxy error:", targetUrl, e.message);
+        return res.status(500).json({ error: "Proxy error: " + e.message, url: targetUrl });
       }
     }
 
