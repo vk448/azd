@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const { Readable } = require("stream");
 const https = require("https");
 
 // Import split modules
@@ -34,6 +35,23 @@ const {
   TVDB_TOKEN, TVDB_TOKEN_TIME, SHARED_BG, ANIKOTO_API
 } = config;
 
+function prefetchManifestSegments(manifestText, headers) {
+  try {
+    const segUrls = [];
+    const lines = manifestText.split('\n');
+    for (let i = 0; i < lines.length && segUrls.length < 2; i++) {
+      const l = lines[i].trim();
+      if (l && !l.startsWith('#') && l.includes('.ts')) {
+        const mpxyMatch = l.match(/\/api\/mpxy\?url=(.+)/);
+        if (mpxyMatch) segUrls.push(decodeURIComponent(mpxyMatch[1]));
+      }
+    }
+    segUrls.forEach(segUrl => {
+      fetch(segUrl, { headers, redirect: "follow" }).catch(() => {});
+    });
+  } catch {}
+}
+
 module.exports = async (req, res) => {
   const ERR_MSG = "Invalid or non-existent MAL ID. Please check the MAL ID and try again.";
   const ERR_404 = "This anime was not found on our source. It may not have episodes uploaded yet.";
@@ -64,13 +82,8 @@ module.exports = async (req, res) => {
         targetUrl = typeof entry === 'string' ? entry : entry.url;
       }
       const targetOrigin = (() => { try { return new URL(targetUrl).origin; } catch { return ""; } })();
-      const proxyHeaders = {
-        "User-Agent": UA,
-        "Referer": targetOrigin + "/",
-        "Origin": targetOrigin,
-        "Accept": "*/*"
-      };
-      if (req.headers.range) proxyHeaders["Range"] = req.headers.range;
+      const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
+      const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
         const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
@@ -97,6 +110,7 @@ module.exports = async (req, res) => {
           res.setHeader("Content-Type", "application/x-mpegURL");
           res.setHeader("Access-Control-Allow-Origin", "*");
           res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+          prefetchManifestSegments(rewritten, proxyHeaders);
           return res.send(rewritten);
         }
         res.setHeader("Content-Type", ct);
@@ -106,9 +120,16 @@ module.exports = async (req, res) => {
         if (cr) res.setHeader("Content-Range", cr);
         const ar = r.headers.get("accept-ranges");
         if (ar) res.setHeader("Accept-Ranges", ar);
-        const buffer = Buffer.from(await r.arrayBuffer());
-        res.statusCode = r.status;
-        return res.send(buffer);
+        try {
+          const nodeStream = Readable.fromWeb(r.body);
+          nodeStream.on('error', function() {});
+          nodeStream.pipe(res);
+          return;
+        } catch(streamErr) {
+          const buffer = Buffer.from(await r.arrayBuffer());
+          res.statusCode = r.status;
+          return res.send(buffer);
+        }
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -120,14 +141,8 @@ module.exports = async (req, res) => {
       if (!targetUrl || !targetUrl.startsWith("http")) {
         return res.status(400).json({ error: "Invalid URL" });
       }
-      const targetOrigin = (() => { try { return new URL(targetUrl).origin; } catch { return ""; } })();
-      const proxyHeaders = {
-        "User-Agent": UA,
-        "Referer": targetOrigin + "/",
-        "Origin": targetOrigin,
-        "Accept": "*/*"
-      };
-      if (req.headers.range) proxyHeaders["Range"] = req.headers.range;
+      const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
+      const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
         const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
@@ -155,6 +170,7 @@ module.exports = async (req, res) => {
           res.setHeader("Content-Type", "application/x-mpegURL");
           res.setHeader("Access-Control-Allow-Origin", "*");
           res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+          prefetchManifestSegments(rewritten, proxyHeaders);
           return res.send(rewritten);
         }
 
@@ -165,9 +181,16 @@ module.exports = async (req, res) => {
         if (cr) res.setHeader("Content-Range", cr);
         const ar = r.headers.get("accept-ranges");
         if (ar) res.setHeader("Accept-Ranges", ar);
-        const buffer = Buffer.from(await r.arrayBuffer());
-        res.statusCode = r.status;
-        return res.send(buffer);
+        try {
+          const nodeStream = Readable.fromWeb(r.body);
+          nodeStream.on('error', function() {});
+          nodeStream.pipe(res);
+          return;
+        } catch(streamErr) {
+          const buffer = Buffer.from(await r.arrayBuffer());
+          res.statusCode = r.status;
+          return res.send(buffer);
+        }
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
