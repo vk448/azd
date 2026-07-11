@@ -1,6 +1,4 @@
 const { spawn } = require("child_process");
-const { Readable } = require("stream");
-const https = require("https");
 
 // Import split modules
 const config = require("./config");
@@ -112,7 +110,7 @@ module.exports = async (req, res) => {
       }
       const proxyHeaders = getProxyHeaders(targetUrl);
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(15000) });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(25000) });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
@@ -154,7 +152,7 @@ module.exports = async (req, res) => {
       }
       const proxyHeaders = getProxyHeaders(targetUrl);
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(15000) });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(25000) });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
 
