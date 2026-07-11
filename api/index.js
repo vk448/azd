@@ -71,11 +71,10 @@ async function streamResponse(r, res, targetUrl) {
   if (ar) res.setHeader("Accept-Ranges", ar);
   try {
     const buffer = Buffer.from(await r.arrayBuffer());
-    res.statusCode = r.status || 200;
-    res.end(buffer);
+    return res.send(buffer);
   } catch (err) {
     console.error("[proxy] Buffer error:", targetUrl, err.message);
-    if (!res.headersSent) res.status(502).json({ error: "Failed to proxy response" });
+    if (!res.headersSent) return res.status(502).json({ error: "Failed to proxy response" });
   }
 }
 
@@ -110,7 +109,7 @@ module.exports = async (req, res) => {
       }
       const proxyHeaders = getProxyHeaders(targetUrl);
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(25000) });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", agent: keepAliveAgent });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
@@ -152,7 +151,7 @@ module.exports = async (req, res) => {
       }
       const proxyHeaders = getProxyHeaders(targetUrl);
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", signal: AbortSignal.timeout(25000) });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", agent: keepAliveAgent });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
 
