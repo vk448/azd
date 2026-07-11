@@ -1121,7 +1121,7 @@ function prefetchManifestSegments(manifestText, headers) {
       }
     }
     segUrls.forEach(segUrl => {
-      fetch(segUrl, { headers, agent: keepAliveAgent, redirect: "follow" }).catch(() => {});
+      fetch(segUrl, { headers, redirect: "follow" }).catch(() => {});
     });
   } catch {}
 }
@@ -1507,7 +1507,7 @@ if(Hls.isSupported()){
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
-  hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){spin.classList.remove('show');showToast('Playback error')}});
+  hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){if(d.type===Hls.ErrorTypes.NETWORK_ERROR){hls.startLoad()}else if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError()}else{spin.classList.remove('show');showToast('Playback error')}}});
 }else if(vid.canPlayType('application/vnd.apple.mpegurl')){vid.src='/api/mpxs/${hash}'}
 }
 (function(){var p=document.getElementById('poster');if(p&&p.dataset.malid){fetch('/api/cover/'+p.dataset.malid).then(function(r){return r.json()}).then(function(d){if(d.image)p.style.backgroundImage='url('+d.image+')'})};initHls()})();
@@ -1792,7 +1792,7 @@ if(Hls.isSupported()){
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
-  hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){spin.classList.remove('show');showToast('Playback error')}});
+  hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){if(d.type===Hls.ErrorTypes.NETWORK_ERROR){hls.startLoad()}else if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError()}else{spin.classList.remove('show');showToast('Playback error')}}});
 }else if(vid.canPlayType('application/vnd.apple.mpegurl')){vid.src='/api/mpxs/${hash}'}
 }
 (function(){var p=document.getElementById('poster');if(p&&p.dataset.malid){fetch('/api/cover/'+p.dataset.malid).then(function(r){return r.json()}).then(function(d){if(d.image)p.style.backgroundImage='url('+d.image+')'})};initHls()})();
@@ -1890,7 +1890,7 @@ module.exports = async (req, res) => {
       const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
       const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", agent: keepAliveAgent });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
@@ -1923,9 +1923,15 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
-        const nodeStream = Readable.fromWeb(r.body);
-        nodeStream.pipe(res);
-        return;
+        try {
+          const nodeStream = Readable.fromWeb(r.body);
+          nodeStream.on('error', function() {});
+          nodeStream.pipe(res);
+          return;
+        } catch(streamErr) {
+          const buffer = Buffer.from(await r.arrayBuffer());
+          return res.send(buffer);
+        }
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1975,9 +1981,15 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
-        const nodeStream = Readable.fromWeb(r.body);
-        nodeStream.pipe(res);
-        return;
+        try {
+          const nodeStream = Readable.fromWeb(r.body);
+          nodeStream.on('error', function() {});
+          nodeStream.pipe(res);
+          return;
+        } catch(streamErr) {
+          const buffer = Buffer.from(await r.arrayBuffer());
+          return res.send(buffer);
+        }
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1991,8 +2003,7 @@ module.exports = async (req, res) => {
       }
       try {
         const r = await fetch(targetUrl, {
-          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" },
-          agent: keepAliveAgent
+          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" }
         });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream error" });
         const body = await r.text();
@@ -2034,17 +2045,22 @@ module.exports = async (req, res) => {
       }
       try {
         const r = await fetch(targetUrl, {
-          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" },
-          agent: keepAliveAgent
+          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" }
         });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream error" });
 
         res.setHeader("Content-Type", "video/mp2t");
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
-        const nodeStream = Readable.fromWeb(r.body);
-        nodeStream.pipe(res);
-        return;
+        try {
+          const nodeStream = Readable.fromWeb(r.body);
+          nodeStream.on('error', function() {});
+          nodeStream.pipe(res);
+          return;
+        } catch(streamErr) {
+          const buffer = Buffer.from(await r.arrayBuffer());
+          return res.send(buffer);
+        }
       } catch (e) {
         return res.status(500).json({ error: "Segment error: " + e.message });
       }
