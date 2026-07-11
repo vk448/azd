@@ -4,7 +4,10 @@ const JIKAN = "https://api.jikan.moe/v4";
 const ANILIST = "https://graphql.anilist.co";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const { spawn } = require("child_process");
+const { Readable } = require("stream");
+const https = require("https");
 const PROXY_BASE = process.env.PROXY_BASE || "";
+const keepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 50, maxFreeSockets: 20 });
 
 function detectLangCode(label) {
   const l = String(label).toLowerCase();
@@ -777,7 +780,7 @@ document.addEventListener("click",function(){qualityMenu.classList.remove("visib
 
 // HLS Setup
 if(m3u8&&Hls.isSupported()){
-  hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30,enableWorker:true,lowLatencyMode:false,startLevel:-1,manifestLoadingTimeOut:5000,levelLoadingTimeOut:5000,fragLoadingTimeOut:10000,backBufferLength:0,manifestLoadingMaxRetry:3,levelLoadingMaxRetry:3});
+  hls=new Hls({maxBufferLength:30,maxMaxBufferLength:90,maxBufferSize:60*1000*1000,maxBufferHole:0.5,enableWorker:true,lowLatencyMode:true,startLevel:-1,startFragPrefetch:true,manifestLoadingTimeOut:8000,levelLoadingTimeOut:8000,fragLoadingTimeOut:20000,backBufferLength:30,manifestLoadingMaxRetry:4,levelLoadingMaxRetry:4,fragLoadingMaxRetry:6,fragLoadingRetryDelay:500,abrBandWidthFactor:0.9,abrBandWidthUpFactor:0.6,abrEwmaFastLive:3.0,abrEwmaSlowLive:9.0});
   hls.loadSource(m3u8);
   hls.attachMedia(video);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,data){
@@ -1038,9 +1041,9 @@ const hashStore = new Map();
 const m3u8Store = new Map();
 const akLookup = new Map();
 
-// TTL cache: key -> { data, ts } ÔÇö 10 min expiry
+// TTL cache: key -> { data, ts } — 30 min expiry
 const streamCache = new Map();
-const CACHE_TTL = 600000;
+const CACHE_TTL = 1800000;
 function cacheGet(key) {
   const e = streamCache.get(key);
   if (e && Date.now() - e.ts < CACHE_TTL) return e.data;
@@ -1053,6 +1056,22 @@ function cacheSet(key, data) {
     streamCache.delete(oldest);
   }
   streamCache.set(key, { data, ts: Date.now() });
+}
+
+// m3u8Store with TTL (1 hour)
+const M3U8_STORE_TTL = 3600000;
+function m3u8Get(key) {
+  const e = m3u8Store.get(key);
+  if (e && Date.now() - e.ts < M3U8_STORE_TTL) return e.data;
+  if (e) m3u8Store.delete(key);
+  return null;
+}
+function m3u8Set(key, data) {
+  if (m3u8Store.size > 500) {
+    const oldest = m3u8Store.keys().next().value;
+    m3u8Store.delete(oldest);
+  }
+  m3u8Store.set(key, { data, ts: Date.now() });
 }
 const MEGAPLAY_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -1088,6 +1107,24 @@ const ANIKAGE_HEADERS = {
   "Sec-Fetch-Mode": "cors",
   "Sec-Fetch-Site": "same-origin"
 };
+
+// Background prefetch: silently warm cache for next 1-2 segments
+function prefetchManifestSegments(manifestText, headers) {
+  try {
+    const segUrls = [];
+    const lines = manifestText.split('\n');
+    for (let i = 0; i < lines.length && segUrls.length < 2; i++) {
+      const l = lines[i].trim();
+      if (l && !l.startsWith('#') && l.includes('.ts')) {
+        const mpxyMatch = l.match(/\/api\/mpxy\?url=(.+)/);
+        if (mpxyMatch) segUrls.push(decodeURIComponent(mpxyMatch[1]));
+      }
+    }
+    segUrls.forEach(segUrl => {
+      fetch(segUrl, { headers, agent: keepAliveAgent, redirect: "follow" }).catch(() => {});
+    });
+  } catch {}
+}
 
 async function anikotoSearchByMal(malId) {
   const r = await fetch(`${ANIKOTO_API}/recent-anime?page=1&per_page=50`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) });
@@ -1161,6 +1198,7 @@ function directFetch(url, headers, redirectCount) {
       hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80),
       path: u.pathname + u.search, method: "GET",
       headers: { ...headers }, rejectUnauthorized: false,
+      agent: u.protocol === "https:" ? keepAliveAgent : undefined,
     };
     const req = mod.request(opts, (res) => {
       if ((res.statusCode === 301 || res.statusCode === 302) && redirectCount > 0) {
@@ -1303,6 +1341,7 @@ async function anikageExtract(anilistId, episodeNum, audioType) {
     let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
     if (!subUrl) subUrl = anikageDecrypt(t.file);
     if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+    if (!subUrl) console.warn("AniKage subtitle drop: no valid URL found for", t.label, t.srclang || t.lang);
     const label = t.label || "English";
     const srclang = t.srclang || t.lang || detectLangCode(label);
     return { file: subUrl || "", label, srclang, kind: "captions", default: t.default || false };
@@ -1323,10 +1362,10 @@ async function anikageExtract(anilistId, episodeNum, audioType) {
 
 function renderEmbedOnly(m3u8Url, tracks, title, intro, outro, existingHash, malId) {
   const hash = existingHash || stableHash("eo", m3u8Url);
-  if (!existingHash) m3u8Store.set(hash, { url: m3u8Url });
+  if (!existingHash) m3u8Set(hash, m3u8Url);
   const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
     const th = stableHash("tr", t.file);
-    m3u8Store.set(th, { url: t.file });
+    m3u8Set(th, t.file);
     const lang = t.srclang || "en";
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
@@ -1464,7 +1503,7 @@ var hls=null,curTimer=null,touchSeeking=false,buffTimer=null;
 var introData=${introJSON},outroData=${outroJSON};
 function initHls(){
 if(Hls.isSupported()){
-   hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,manifestLoadingTimeOut:3000,levelLoadingTimeOut:3000,fragLoadingTimeOut:20000,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingMaxRetry:3,levelLoadingMaxRetry:3,fragLoadingMaxRetry:6,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
+   hls=new Hls({maxBufferLength:30,maxMaxBufferLength:90,maxBufferSize:60*1000*1000,maxBufferHole:0.5,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingTimeOut:8000,levelLoadingTimeOut:8000,fragLoadingTimeOut:20000,backBufferLength:30,manifestLoadingMaxRetry:4,levelLoadingMaxRetry:4,fragLoadingMaxRetry:6,fragLoadingRetryDelay:500,abrBandWidthFactor:0.9,abrBandWidthUpFactor:0.6,abrEwmaFastLive:3.0,abrEwmaSlowLive:9.0,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
@@ -1472,21 +1511,14 @@ if(Hls.isSupported()){
 }else if(vid.canPlayType('application/vnd.apple.mpegurl')){vid.src='/api/mpxs/${hash}'}
 }
 (function(){var p=document.getElementById('poster');if(p&&p.dataset.malid){fetch('/api/cover/'+p.dataset.malid).then(function(r){return r.json()}).then(function(d){if(d.image)p.style.backgroundImage='url('+d.image+')'})};initHls()})();
-function autoSubs(){setTimeout(function(){
-  var tt=vid.textTracks;if(!tt||!tt.length)return;
-  var defaultIdx=-1;
-  for(var i=0;i<tt.length;i++){var t=tt[i];t.mode='hidden';if(t.label&&t.label.toLowerCase().includes('english'))defaultIdx=i}
-  if(defaultIdx<0)defaultIdx=0;
-  if(tt[defaultIdx]){tt[defaultIdx].mode='showing';var cu=tt[defaultIdx].cues;if(cu)for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}}
-  for(var i=0;i<tt.length;i++){(function(ti){
-    var intv=setInterval(function(){
-      var cu=tt[ti].cues;if(!cu)return;
-      for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}
-    },200);
-    setTimeout(function(){clearInterval(intv)},2000);
-  })(i)}
-  setTimeout(function(){if(ccList)buildCaptions()},500);
-},300)}
+function autoSubs(retryCount){retryCount=retryCount||0;var tt=vid.textTracks;if(!tt||!tt.length){if(retryCount<15){setTimeout(function(){autoSubs(retryCount+1)},200)}return}
+var defaultIdx=-1;
+for(var i=0;i<tt.length;i++){var t=tt[i];t.mode='hidden';var label=(t.label||'').toLowerCase();if(label.includes('english')||label.includes('eng'))defaultIdx=i}
+if(defaultIdx<0)defaultIdx=0;
+if(tt[defaultIdx]){tt[defaultIdx].mode='showing';var applyLinePositions=function(){var cu=tt[defaultIdx].cues;if(!cu)return;for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}};applyLinePositions();tt[defaultIdx].addEventListener('cuechange',applyLinePositions)}
+buildCaptions()}
+(function(){var trackEls=vid.querySelectorAll('track');trackEls.forEach(function(te){te.addEventListener('error',function(){console.warn('Subtitle track failed to load:',te.src,te.label)})})})();
+setTimeout(function(){if(ccList)buildCaptions()},500)}
 function buildQuality(levels){
   qList.innerHTML='';var seen={};
   levels.forEach(function(l,i){
@@ -1527,6 +1559,7 @@ vid.onended=function(){setPlayIcon();cplay.classList.remove('hidden');box.classL
 vid.onwaiting=function(){spin.classList.add('show');if(buffTimer)clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000)};
 vid.oncanplay=function(){spin.classList.remove('show');if(buffTimer){clearTimeout(buffTimer);buffTimer=null}};
 vid.onloadedmetadata=function(){tcur.textContent=fTime(vid.currentTime);tdur.textContent=fTime(vid.duration)};
+vid.addEventListener('loadeddata',function(){autoSubs()});
 vid.onplaying=function(){spin.classList.remove('show');if(buffTimer){clearTimeout(buffTimer);buffTimer=null}};
 (function(){var p=document.getElementById('poster');if(p)p.onclick=function(){p.style.display='none';togglePlay()}})();
 vid.ontimeupdate=function(){if(!vid.duration)return;var p=(vid.currentTime/vid.duration)*100;fill.style.width=p+'%';dot.style.left=p+'%';tcur.textContent=fTime(vid.currentTime);tdur.textContent=fTime(vid.duration);checkSkip(vid.currentTime)};
@@ -1564,10 +1597,10 @@ function showToast(m){toastEl.textContent=m;toastEl.classList.add('show');setTim
 }
 function renderMegaPlayer(m3u8Url, tracks, title, intro, outro, malId, epNum) {
   const hash = stableHash("mp", m3u8Url);
-  m3u8Store.set(hash, { url: m3u8Url });
+  m3u8Set(hash, m3u8Url);
   const trackTags = (tracks || []).filter(t => t.file && (t.kind === "captions" || t.kind === "subtitles" || !t.kind)).map(t => {
     const th = stableHash("tr", t.file);
-    m3u8Store.set(th, { url: t.file });
+    m3u8Set(th, t.file);
     const lang = t.srclang || "en";
     return `<track kind="captions" src="/api/mpxs/${th}" srclang="${lang}" label="${t.label || 'English'}" ${t.default ? "default" : ""}>`;
   }).join("\n");
@@ -1754,7 +1787,7 @@ var hls=null,curTimer=null,touchSeeking=false,buffTimer=null;
 var introData=${introJSON},outroData=${outroJSON};
 function initHls(){
 if(Hls.isSupported()){
-  hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,manifestLoadingTimeOut:3000,levelLoadingTimeOut:3000,fragLoadingTimeOut:20000,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingMaxRetry:3,levelLoadingMaxRetry:3,fragLoadingMaxRetry:6,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
+  hls=new Hls({maxBufferLength:30,maxMaxBufferLength:90,maxBufferSize:60*1000*1000,maxBufferHole:0.5,enableWorker:true,lowLatencyMode:true,startLevel:0,startFragPrefetch:true,manifestLoadingTimeOut:8000,levelLoadingTimeOut:8000,fragLoadingTimeOut:20000,backBufferLength:30,manifestLoadingMaxRetry:4,levelLoadingMaxRetry:4,fragLoadingMaxRetry:6,fragLoadingRetryDelay:500,abrBandWidthFactor:0.9,abrBandWidthUpFactor:0.6,abrEwmaFastLive:3.0,abrEwmaSlowLive:9.0,nudgeOffset:0.15,nudgeMaxRetry:5,maxSeekHole:3});
   hls.loadSource('/api/mpxs/${hash}');
   hls.attachMedia(vid);
   hls.on(Hls.Events.MANIFEST_PARSED,function(e,d){buildQuality(d.levels);autoSubs()});
@@ -1762,21 +1795,14 @@ if(Hls.isSupported()){
 }else if(vid.canPlayType('application/vnd.apple.mpegurl')){vid.src='/api/mpxs/${hash}'}
 }
 (function(){var p=document.getElementById('poster');if(p&&p.dataset.malid){fetch('/api/cover/'+p.dataset.malid).then(function(r){return r.json()}).then(function(d){if(d.image)p.style.backgroundImage='url('+d.image+')'})};initHls()})();
-function autoSubs(){setTimeout(function(){
-  var tt=vid.textTracks;if(!tt||!tt.length)return;
-  var defaultIdx=-1;
-  for(var i=0;i<tt.length;i++){var t=tt[i];t.mode='hidden';if(t.label&&t.label.toLowerCase().includes('english'))defaultIdx=i}
-  if(defaultIdx<0)defaultIdx=0;
-  if(tt[defaultIdx]){tt[defaultIdx].mode='showing';var cu=tt[defaultIdx].cues;if(cu)for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}}
-  for(var i=0;i<tt.length;i++){(function(ti){
-    var intv=setInterval(function(){
-      var cu=tt[ti].cues;if(!cu)return;
-      for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}
-    },200);
-    setTimeout(function(){clearInterval(intv)},2000);
-  })(i)}
-  setTimeout(buildCaptions,500);
-},300)}
+function autoSubs(retryCount){retryCount=retryCount||0;var tt=vid.textTracks;if(!tt||!tt.length){if(retryCount<15){setTimeout(function(){autoSubs(retryCount+1)},200)}return}
+var defaultIdx=-1;
+for(var i=0;i<tt.length;i++){var t=tt[i];t.mode='hidden';var label=(t.label||'').toLowerCase();if(label.includes('english')||label.includes('eng'))defaultIdx=i}
+if(defaultIdx<0)defaultIdx=0;
+if(tt[defaultIdx]){tt[defaultIdx].mode='showing';var applyLinePositions=function(){var cu=tt[defaultIdx].cues;if(!cu)return;for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}};applyLinePositions();tt[defaultIdx].addEventListener('cuechange',applyLinePositions)}
+buildCaptions()}
+(function(){var trackEls=vid.querySelectorAll('track');trackEls.forEach(function(te){te.addEventListener('error',function(){console.warn('Subtitle track failed to load:',te.src,te.label)})})})();
+setTimeout(buildCaptions,500);
 function buildQuality(levels){qList.innerHTML='';var seen={};levels.forEach(function(l,i){var h=l.height||0;if(!h||h<360||h>2160||seen[h])return;seen[h]=true;var el=document.createElement('div');el.className='ditem';el.textContent=h+'p';el.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=i;hls.loadLevel=i}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');qAuto.classList.remove('active');showToast(h+'p');closeDrops()};qList.appendChild(el)})}
 qAuto.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=-1;hls.loadLevel=-1}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});qAuto.classList.add('active');showToast('Auto');closeDrops()};
 function buildCaptions(){ccList.innerHTML='';var tt=vid.textTracks;if(!tt)return;for(var i=0;i<tt.length;i++){(function(idx){var t=tt[idx];t.mode='hidden';var el=document.createElement('div');el.className='ditem';el.textContent=t.label||'CC '+(idx+1);el.onclick=function(e){e.stopPropagation();for(var j=0;j<tt.length;j++)tt[j].mode='hidden';t.mode='showing';ccList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');ccOff.classList.remove('active');showToast('CC: '+t.label);closeDrops()};ccList.appendChild(el)})(i)}}
@@ -1801,6 +1827,7 @@ vid.onended=function(){setPlayIcon();cplay.classList.remove('hidden');ctrls.clas
 vid.onwaiting=function(){spin.classList.add('show');if(buffTimer)clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000)};
 vid.oncanplay=function(){spin.classList.remove('show');if(buffTimer){clearTimeout(buffTimer);buffTimer=null}};
 vid.onloadedmetadata=function(){tcur.textContent=fTime(vid.currentTime);tdur.textContent=fTime(vid.duration)};
+vid.addEventListener('loadeddata',function(){autoSubs()});
 vid.onplaying=function(){spin.classList.remove('show');if(buffTimer){clearTimeout(buffTimer);buffTimer=null}};
 (function(){var p=document.getElementById('poster');if(p)p.onclick=function(){p.style.display='none';togglePlay()}})();
 vid.ontimeupdate=function(){if(!vid.duration)return;var p=(vid.currentTime/vid.duration)*100;fill.style.width=p+'%';dot.style.left=p+'%';tcur.textContent=fTime(vid.currentTime);tdur.textContent=fTime(vid.duration);checkSkip(vid.currentTime)};
@@ -1854,13 +1881,13 @@ module.exports = async (req, res) => {
     const mpxsMatch = path.match(/^\/api\/mpxs\/(\w+)$/);
     if (mpxsMatch) {
       const hash = mpxsMatch[1];
-      const entry = m3u8Store.get(hash);
+      const entry = m3u8Get(hash);
       if (!entry) return res.status(404).json({ error: "Invalid or expired token" });
-      const targetUrl = entry.url;
+      const targetUrl = typeof entry === 'string' ? entry : entry.url;
       const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
       const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", agent: keepAliveAgent });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
         if (ct.includes("mpegurl") || targetUrl.split("?")[0].endsWith(".m3u8")) {
@@ -1871,7 +1898,7 @@ module.exports = async (req, res) => {
             const abs = absUrl(line, targetUrl, base);
             if (abs.includes(".m3u8")) {
               const h = stableHash("p", abs);
-              m3u8Store.set(h, { url: abs });
+              m3u8Set(h, abs);
               return "/api/mpxs/" + h;
             }
             return "/api/mpxy?url=" + encodeURIComponent(abs);
@@ -1879,20 +1906,23 @@ module.exports = async (req, res) => {
             const abs = absUrl(uri, targetUrl, base);
             if (abs.includes(".m3u8")) {
               const h = stableHash("p", abs);
-              m3u8Store.set(h, { url: abs });
+              m3u8Set(h, abs);
               return 'URI="/api/mpxs/' + h + '"';
             }
             return 'URI="/api/mpxy?url=' + encodeURIComponent(abs) + '"';
           });
           res.setHeader("Content-Type", "application/x-mpegURL");
           res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+          prefetchManifestSegments(rewritten, proxyHeaders);
           return res.send(rewritten);
         }
-        const buffer = await r.arrayBuffer();
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.send(Buffer.from(buffer));
+        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+        const nodeStream = Readable.fromWeb(r.body);
+        nodeStream.pipe(res);
+        return;
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1907,7 +1937,7 @@ module.exports = async (req, res) => {
       const isAnizone = targetUrl.includes("xin-cdn.xyz") || targetUrl.includes("vid-cdn.xyz");
       const proxyHeaders = isAnizone ? ANIZONE_HEADERS : MEGAPLAY_HEADERS;
       try {
-        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow" });
+        const r = await fetch(targetUrl, { headers: proxyHeaders, redirect: "follow", agent: keepAliveAgent });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream " + r.status });
         const ct = r.headers.get("content-type") || "application/octet-stream";
 
@@ -1919,7 +1949,7 @@ module.exports = async (req, res) => {
             const abs = absUrl(line, targetUrl, base);
             if (abs.includes(".m3u8")) {
               const h = stableHash("p", abs);
-              m3u8Store.set(h, { url: abs });
+              m3u8Set(h, abs);
               return "/api/mpxs/" + h;
             }
             return "/api/mpxy?url=" + encodeURIComponent(abs);
@@ -1927,21 +1957,24 @@ module.exports = async (req, res) => {
             const abs = absUrl(uri, targetUrl, base);
             if (abs.includes(".m3u8")) {
               const h = stableHash("p", abs);
-              m3u8Store.set(h, { url: abs });
+              m3u8Set(h, abs);
               return 'URI="/api/mpxs/' + h + '"';
             }
             return 'URI="/api/mpxy?url=' + encodeURIComponent(abs) + '"';
           });
           res.setHeader("Content-Type", "application/x-mpegURL");
           res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+          prefetchManifestSegments(rewritten, proxyHeaders);
           return res.send(rewritten);
         }
 
-        const buffer = await r.arrayBuffer();
         res.setHeader("Content-Type", ct);
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.send(Buffer.from(buffer));
+        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+        const nodeStream = Readable.fromWeb(r.body);
+        nodeStream.pipe(res);
+        return;
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
       }
@@ -1955,7 +1988,8 @@ module.exports = async (req, res) => {
       }
       try {
         const r = await fetch(targetUrl, {
-          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" }
+          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" },
+          agent: keepAliveAgent
         });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream error" });
         const body = await r.text();
@@ -1982,6 +2016,7 @@ module.exports = async (req, res) => {
 
         res.setHeader("Content-Type", "application/x-mpegURL");
         res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
         return res.send(rewritten);
       } catch (e) {
         return res.status(500).json({ error: "Proxy error: " + e.message });
@@ -1996,16 +2031,17 @@ module.exports = async (req, res) => {
       }
       try {
         const r = await fetch(targetUrl, {
-          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" }
+          headers: { "User-Agent": UA, "Referer": "https://toonstream.vip/" },
+          agent: keepAliveAgent
         });
         if (!r.ok) return res.status(r.status).json({ error: "Upstream error" });
 
         res.setHeader("Content-Type", "video/mp2t");
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=3600");
-
-        const buffer = Buffer.from(await r.arrayBuffer());
-        return res.send(buffer);
+        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
+        const nodeStream = Readable.fromWeb(r.body);
+        nodeStream.pipe(res);
+        return;
       } catch (e) {
         return res.status(500).json({ error: "Segment error: " + e.message });
       }
@@ -2289,7 +2325,7 @@ module.exports = async (req, res) => {
         const html = await anizoneFetchEpisode(slug, ep);
         const data = anizoneParseEpisode(html, slug, ep);
         const hash = stableHash("az", slug, ep);
-        m3u8Store.set(hash, { url: data.videoUrl });
+        m3u8Set(hash, data.videoUrl);
         return res.status(200).json({
           success: true,
           source: "anizone",
@@ -2372,6 +2408,7 @@ module.exports = async (req, res) => {
           let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
           if (!subUrl) subUrl = anikageDecrypt(t.file);
           if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+          if (!subUrl) console.warn("AniKage subtitle drop: no valid URL found for", t.label, t.srclang || t.lang);
           return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
         }).filter(t => t.file);
         return res.status(200).json({
@@ -2393,7 +2430,7 @@ module.exports = async (req, res) => {
       try {
         const data = await anikageExtract(aid, ep, audioType);
         const hash = stableHash("ak", aid, ep, audioType);
-        m3u8Store.set(hash, { url: data.videoUrl });
+        m3u8Set(hash, data.videoUrl);
         return res.status(200).json({
           success: true, source: "anikage", anilistId: aid, episode: ep, type: audioType,
           server: data.server, hash, m3u8: data.videoUrl,
@@ -2443,6 +2480,7 @@ module.exports = async (req, res) => {
             let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
             if (!subUrl) subUrl = anikageDecrypt(t.file);
             if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+            if (!subUrl) console.warn("AniKage subtitle drop: no valid URL found for", t.label, t.srclang || t.lang);
             return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
           }).filter(t => t.file);
           cached = { m3u8, tracks, intro: sources.intro || null, outro: sources.outro || null };
@@ -2808,7 +2846,7 @@ module.exports = async (req, res) => {
           if (!title) return res.status(400).json({ error: "No title for search" });
           const azResult = await anizoneExtract(title, epNum);
           const hash = stableHash("az", azResult.videoUrl);
-          m3u8Store.set(hash, { url: azResult.videoUrl });
+          m3u8Set(hash, azResult.videoUrl);
           return res.status(200).json({
             success: true, source: "anizone", anilistId: aid, slug: azResult.slug,
             title: azResult.title, episode: epNum, hash, m3u8: azResult.videoUrl, tracks: azResult.tracks
@@ -2891,6 +2929,7 @@ module.exports = async (req, res) => {
                           let subUrl = (t.file && t.file.startsWith("http")) ? t.file : null;
                           if (!subUrl) subUrl = anikageDecrypt(t.file);
                           if (!subUrl) subUrl = anikageSubFromEmbedUrl(t.embedUrl);
+                          if (!subUrl) console.warn("AniKage subtitle drop: no valid URL found for", t.label, t.srclang || t.lang);
                           return { file: subUrl || "", label: t.label || "English", kind: "captions", default: t.default || false };
                         }).filter(t => t.file);
                         cached = { m3u8, tracks, intro: src.intro || null, outro: src.outro || null };
