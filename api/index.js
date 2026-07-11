@@ -442,7 +442,25 @@ module.exports = async (req, res) => {
       const type = url.searchParams.get("type") || "sub";
       try {
         const info = await jikanInfo(mid);
-        const result = await extractMegaPlayByMal(mid, ep, type);
+        let result = null;
+        let videoUrl = null;
+        try {
+          result = await extractMegaPlayByMal(mid, ep, type);
+          if (result && result.m3u8) videoUrl = result.m3u8;
+        } catch {}
+        if (!videoUrl) {
+          try {
+            const anilistId = await findAnilistIdByTitle(info.eng || info.title, mid);
+            if (anilistId) {
+              const ak = await anikageExtract(anilistId, ep, type);
+              if (ak && ak.videoUrl) {
+                result = { m3u8: ak.videoUrl, tracks: ak.tracks || [], intro: ak.intro || null, outro: ak.outro || null };
+                videoUrl = ak.videoUrl;
+              }
+            }
+          } catch {}
+        }
+        if (!videoUrl) throw new Error("No streams available from any source");
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayer(result.m3u8, result.tracks, info.title + " - EP" + ep, result.intro, result.outro, mid, ep));
       } catch (e) {
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("EP" + ep + ": " + e.message));
@@ -457,7 +475,25 @@ module.exports = async (req, res) => {
       const type = url.searchParams.get("type") || "sub";
       try {
         const info = await jikanInfo(mid);
-        const result = await extractMegaPlayByMal(mid, ep, type);
+        let result = null;
+        let videoUrl = null;
+        try {
+          result = await extractMegaPlayByMal(mid, ep, type);
+          if (result && result.m3u8) videoUrl = result.m3u8;
+        } catch {}
+        if (!videoUrl) {
+          try {
+            const anilistId = await findAnilistIdByTitle(info.eng || info.title, mid);
+            if (anilistId) {
+              const ak = await anikageExtract(anilistId, ep, type);
+              if (ak && ak.videoUrl) {
+                result = { m3u8: ak.videoUrl, tracks: ak.tracks || [], intro: ak.intro || null, outro: ak.outro || null };
+                videoUrl = ak.videoUrl;
+              }
+            }
+          } catch {}
+        }
+        if (!videoUrl) throw new Error("No streams available from any source");
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderMegaPlayer(result.m3u8, result.tracks, info.title + " - EP" + ep, result.intro, result.outro, mid, ep));
       } catch (e) {
         return res.setHeader("Content-Type", "text/html;charset=UTF-8").send(renderError("EP" + ep + ": " + e.message));
@@ -854,6 +890,22 @@ module.exports = async (req, res) => {
     }
 
     // ====== NEW ANILIST-BASED ENDPOINTS ======
+
+    // Helper: find AniList ID by title and MAL ID
+    async function findAnilistIdByTitle(title, malId) {
+      try {
+        const d = await anilistQuery(
+          `query($q:String,$p:Int,$pp:Int){Page(page:$p,perPage:$pp){media(search:$q,type:ANIME){id idMal}}}`,
+          { q: title, p: 1, pp: 10 }
+        );
+        if (d.Page && d.Page.media) {
+          const exact = d.Page.media.find(m => m.idMal === malId);
+          if (exact) return exact.id;
+          if (d.Page.media.length) return d.Page.media[0].id;
+        }
+      } catch {}
+      return null;
+    }
 
     // Helper: format AniList media to common JSON
     function fmtMedia(m) {
