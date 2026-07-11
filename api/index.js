@@ -1516,9 +1516,10 @@ var defaultIdx=-1;
 for(var i=0;i<tt.length;i++){var t=tt[i];t.mode='hidden';var label=(t.label||'').toLowerCase();if(label.includes('english')||label.includes('eng'))defaultIdx=i}
 if(defaultIdx<0)defaultIdx=0;
 if(tt[defaultIdx]){tt[defaultIdx].mode='showing';var applyLinePositions=function(){var cu=tt[defaultIdx].cues;if(!cu)return;for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}};applyLinePositions();tt[defaultIdx].addEventListener('cuechange',applyLinePositions)}
-buildCaptions()}
-(function(){var trackEls=vid.querySelectorAll('track');trackEls.forEach(function(te){te.addEventListener('error',function(){console.warn('Subtitle track failed to load:',te.src,te.label)})})})();
-setTimeout(function(){if(ccList)buildCaptions()},500)}
+buildCaptions();
+var trackEls=vid.querySelectorAll('track');
+trackEls.forEach(function(te){te.addEventListener('error',function(){console.warn('Subtitle track failed to load:',te.src,te.label)})});
+}
 function buildQuality(levels){
   qList.innerHTML='';var seen={};
   levels.forEach(function(l,i){
@@ -1735,7 +1736,7 @@ video::cue{background:rgba(0,0,0,0.85)!important;color:#fff!important;font-size:
   <div class="ep-title">${titleClean} — EP ${epNum}</div>
   <div class="type-badge">SUB</div>
 </div>
-${bgImage ? `<div class="player-bg" id="detail-bg" style="background-image:url('${bgImage}')"></div>` : ""}
+
 <div class="player-wrap">
 <div class="player-box" id="box">
   <video id="vid" preload="auto" playsinline crossorigin>${trackTags}</video>
@@ -1800,8 +1801,10 @@ var defaultIdx=-1;
 for(var i=0;i<tt.length;i++){var t=tt[i];t.mode='hidden';var label=(t.label||'').toLowerCase();if(label.includes('english')||label.includes('eng'))defaultIdx=i}
 if(defaultIdx<0)defaultIdx=0;
 if(tt[defaultIdx]){tt[defaultIdx].mode='showing';var applyLinePositions=function(){var cu=tt[defaultIdx].cues;if(!cu)return;for(var j=0;j<cu.length;j++){var c=cu[j];if(typeof c.line==='number'&&c.line>=-1)c.line=-2}};applyLinePositions();tt[defaultIdx].addEventListener('cuechange',applyLinePositions)}
-buildCaptions()}
-(function(){var trackEls=vid.querySelectorAll('track');trackEls.forEach(function(te){te.addEventListener('error',function(){console.warn('Subtitle track failed to load:',te.src,te.label)})})})();
+buildCaptions();
+var trackEls=vid.querySelectorAll('track');
+trackEls.forEach(function(te){te.addEventListener('error',function(){console.warn('Subtitle track failed to load:',te.src,te.label)})});
+}
 setTimeout(buildCaptions,500);
 function buildQuality(levels){qList.innerHTML='';var seen={};levels.forEach(function(l,i){var h=l.height||0;if(!h||h<360||h>2160||seen[h])return;seen[h]=true;var el=document.createElement('div');el.className='ditem';el.textContent=h+'p';el.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=i;hls.loadLevel=i}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});el.classList.add('active');qAuto.classList.remove('active');showToast(h+'p');closeDrops()};qList.appendChild(el)})}
 qAuto.onclick=function(e){e.stopPropagation();if(hls){hls.currentLevel=-1;hls.loadLevel=-1}spin.classList.add('show');clearTimeout(buffTimer);buffTimer=setTimeout(function(){spin.classList.remove('show')},15000);qList.querySelectorAll('.ditem').forEach(function(b){b.classList.remove('active')});qAuto.classList.add('active');showToast('Auto');closeDrops()};
