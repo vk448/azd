@@ -197,7 +197,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Player</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script src="/api/hls.js"></script>
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,#1a0505 0%,#060202 70%);font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#ffe6e8;overflow:hidden}
@@ -361,7 +361,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
       if(trk.kind!=="captions"&&trk.kind!=="subtitles")return;
       hasSub=true;
       var el=document.createElement("track");el.kind=trk.kind;el.src=trk.file;el.label=trk.label||"Sub "+(i+1);el.srclang=trk.label?trk.label.substring(0,2).toLowerCase():"en";if(trk.default)el.default=true;video.appendChild(el);
-      var row=document.createElement("div");row.className="option-row";row.setAttribute("data-sub",i);row.innerHTML="<span>"+(trk.label||"Sub")+"</span><span class=\"dot\"></span>";subOptions.appendChild(row);
+      var row=document.createElement("div");row.className="option-row";row.setAttribute("data-sub",i);row.innerHTML="<span>"+(trk.label||"Sub")+'</span><span class="dot"></span>';subOptions.appendChild(row);
     });
     if(hasSub){
       document.querySelector('[data-target="panelSub"]').style.display="";
@@ -383,21 +383,30 @@ const PLAYER_HTML = `<!DOCTYPE html>
     }
   }
 
-  if(src&&window.Hls&&Hls.isSupported()){
-    hls=new Hls({startLevel:-1,capLevelToPlayerSize:true,maxBufferLength:30,maxMaxBufferLength:60,startFragPrefetch:true});
-    hls.loadSource(src);hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED,function(){
-      setTag("ready");
-      if(hls.levels&&hls.levels.length>=1){hls.levels.forEach(function(lvl,i){var label=lvl.height?lvl.height+"p":Math.round(lvl.bitrate/1000)+"kbps";var row=document.createElement("div");row.className="option-row";row.setAttribute("data-quality",i);row.innerHTML="<span>"+label+"</span><span class=\"dot\"></span>";qualityOptions.appendChild(row)})}
-      initSubs();
-    });
-    hls.on(Hls.Events.LEVEL_SWITCHED,function(){});
-    hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){if(d.type===Hls.ErrorTypes.NETWORK_ERROR){setTag("reconnecting...");hls.startLoad()}else if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError()}}});
-  }else if(src&&video.canPlayType("application/vnd.apple.mpegurl")){
-    video.src=src;initSubs();
-  }else if(src){
-    video.src=src;initSubs();
+  function initHls(){
+    if(src&&window.Hls&&Hls.isSupported()){
+      hls=new Hls({startLevel:-1,capLevelToPlayerSize:true,maxBufferLength:30,maxMaxBufferLength:60,startFragPrefetch:true});
+      hls.loadSource(src);hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED,function(){
+        setTag("ready");
+        if(hls.levels&&hls.levels.length>=1){hls.levels.forEach(function(lvl,i){var label=lvl.height?lvl.height+"p":Math.round(lvl.bitrate/1000)+"kbps";var row=document.createElement("div");row.className="option-row";row.setAttribute("data-quality",i);row.innerHTML='<span>'+label+'</span><span class="dot"></span>';qualityOptions.appendChild(row)})}
+        initSubs();
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED,function(){});
+      hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){if(d.type===Hls.ErrorTypes.NETWORK_ERROR){setTag("reconnecting...");hls.startLoad()}else if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError()}}});
+    }else if(src&&video.canPlayType("application/vnd.apple.mpegurl")){
+      video.src=src;initSubs();
+    }else if(src){
+      video.src=src;initSubs();
+    }else{
+      setTag("No source");statusTag.style.color="#ff1e3c";
+    }
   }
+
+  if(src&&!window.Hls){
+    setTag("loading player...");
+  }
+  initHls();
 
   qualityOptions.addEventListener("click",function(e){
     var row=e.target.closest(".option-row");if(!row)return;
@@ -700,8 +709,9 @@ async function getDownloadLinks(malId, episode) {
   return result;
 }
 
-function rewriteM3u8(content, baseUrl, serverHost) {
+function rewriteM3u8(content, baseUrl, serverHost, hParam) {
   var baseDir = baseUrl.substring(0, baseUrl.lastIndexOf("/") + 1);
+  hParam = hParam || "";
   return content.split("\n").map(function(line) {
     var trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) return line;
@@ -709,7 +719,7 @@ function rewriteM3u8(content, baseUrl, serverHost) {
     if (!trimmed.startsWith("http")) {
       absUrl = trimmed.startsWith("/") ? new URL(trimmed, new URL(baseUrl).origin).href : baseDir + trimmed;
     }
-    return serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(absUrl);
+    return serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(absUrl) + hParam;
   }).join("\n");
 }
 
@@ -723,7 +733,7 @@ async function handleRequest(request) {
 
   var reqUrl = new URL(request.url);
   var host = reqUrl.host || "localhost";
-  var proto = "https";
+  var proto = reqUrl.protocol ? reqUrl.protocol.replace(":", "") : "https";
   var serverHost = proto + "://" + host;
   var url = decodeURIComponent(reqUrl.pathname);
 
@@ -755,7 +765,10 @@ async function handleRequest(request) {
             var lang = langKeys[li];
             if (sources[lang]) {
               var s = sources[lang];
-              var cfg = { source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle };
+              var mpH = "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
+              var proxiedM3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(s.m3u8) + mpH;
+              var proxiedTracks = (s.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + mpH }); });
+              var cfg = { source: "megaplay", type: lang, m3u8: proxiedM3u8, tracks: proxiedTracks, intro: s.intro || null, outro: s.outro || null, title: animeTitle };
               var hash = toBase64(JSON.stringify(cfg));
               result.megaplay.push(Object.assign({}, cfg, { embedUrl: "/api/watch-embed/" + hash }));
             }
@@ -789,8 +802,9 @@ async function handleRequest(request) {
       var wHash = watchMatch[1];
       var wConfig = {};
       try { wConfig = JSON.parse(fromBase64(wHash)); } catch {}
-      wConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wConfig.m3u8);
-      if (wConfig.tracks) { wConfig.tracks = wConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) }); }); }
+      var mpH = "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
+      wConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wConfig.m3u8) + mpH;
+      if (wConfig.tracks) { wConfig.tracks = wConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + mpH }); }); }
       var playerPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wConfig) + ";</script></head>");
       return new Response(playerPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
@@ -828,7 +842,12 @@ async function handleRequest(request) {
     if (url === "/api/proxy/m3u8") {
       var targetUrl = reqUrl.searchParams.get("url");
       if (!targetUrl) return new Response("Missing url param", { status: 400 });
-      var r = await fetch(targetUrl, { headers: Object.assign({}, CDN_HEADERS) });
+      var customHeaders = reqUrl.searchParams.get("headers");
+      var fetchHeaders = Object.assign({}, CDN_HEADERS);
+      if (customHeaders) {
+        try { var parsed = JSON.parse(customHeaders); Object.assign(fetchHeaders, parsed); } catch {}
+      }
+      var r = await fetch(targetUrl, { headers: fetchHeaders });
       var contentType = r.headers.get("content-type") || "";
       var isM3u8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8") || targetUrl.endsWith(".m3u8");
       if (!r.ok) {
@@ -837,7 +856,8 @@ async function handleRequest(request) {
       }
       if (isM3u8) {
         var body = await r.text();
-        var rewritten = rewriteM3u8(body, targetUrl, serverHost);
+        var hParam = customHeaders ? "&headers=" + encodeURIComponent(customHeaders) : "";
+        var rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
         return new Response(rewritten, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/vnd.apple.mpegurl" }) });
       } else {
         var buf = new Uint8Array(await r.arrayBuffer());
@@ -850,6 +870,18 @@ async function handleRequest(request) {
 
     if (url === "/api/health") {
       return new Response(JSON.stringify({ ok: true, time: Date.now() }), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+    }
+
+    if (url === "/api/hls.js" || url === "/api/hls.min.js") {
+      try {
+        var fs = require("fs");
+        var path = require("path");
+        var hlsPath = path.join(__dirname, "hls.min.js");
+        var hlsCode = fs.readFileSync(hlsPath, "utf8");
+        return new Response(hlsCode, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=86400" }) });
+      } catch (e) {
+        return new Response("HLS.js not found", { status: 404, headers: corsHeaders });
+      }
     }
 
     return new Response("Not found", { status: 404, headers: corsHeaders });
