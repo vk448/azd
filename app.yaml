@@ -6,4 +6,5 @@ capabilities:
   instaboot:
     requests:
       - path: /api/health
-    max_age: 5m
+      - path: /api/anime-embed/199221/episode/6
+    max_age: 2m

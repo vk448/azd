@@ -910,6 +910,8 @@ async function handleRequest(request) {
   }
 }
 
+var _READY = false;
+
 if (typeof module !== "undefined" && module.exports) {
   try {
     var http = require("http");
@@ -934,19 +936,27 @@ if (typeof module !== "undefined" && module.exports) {
   } catch(e) {}
 }
 
-if (typeof module !== "undefined") module.exports = { handleRequest };
-
 if (typeof addEventListener !== "undefined") {
   addEventListener("fetch", function(fetchEvent) {
     fetchEvent.respondWith((async function() {
-      try {
-        if (typeof handleRequest !== "function") {
-          return new Response(JSON.stringify({ error: "Service initializing, retry in 2s" }), { status: 503, headers: { "Content-Type": "application/json", "Retry-After": "2", "Access-Control-Allow-Origin": "*" } });
+      var req = fetchEvent.request;
+      var reqUrl2;
+      try { reqUrl2 = new URL(req.url); } catch(e) { reqUrl2 = { pathname: "/" }; }
+
+      if (!_READY || typeof handleRequest !== "function") {
+        if (reqUrl2.pathname === "/api/health") {
+          return new Response(JSON.stringify({ ok: true, warming: true, time: Date.now() }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
         }
-        return await handleRequest(fetchEvent.request);
+        return new Response(JSON.stringify({ error: "Service initializing", retry: true }), { status: 503, headers: { "Content-Type": "application/json", "Retry-After": "1", "Access-Control-Allow-Origin": "*" } });
+      }
+
+      try {
+        return await handleRequest(req);
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message || "Internal error" }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
       }
     })());
   });
 }
+
+_READY = true;
