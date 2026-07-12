@@ -734,6 +734,7 @@ async function handleRequest(request) {
   var reqUrl = new URL(request.url);
   var host = reqUrl.host || "localhost";
   var proto = reqUrl.protocol ? reqUrl.protocol.replace(":", "") : "https";
+  if (proto === "http" && host.indexOf("localhost") === -1 && host.indexOf("127.") === -1) proto = "https";
   var serverHost = proto + "://" + host;
   var url = decodeURIComponent(reqUrl.pathname);
 
