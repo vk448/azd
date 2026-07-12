@@ -883,13 +883,18 @@ async function handleRequest(request) {
           }
         } catch (e) {}
         if (!hlsCode) {
-          var cdnResp = await fetch("https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js");
-          if (cdnResp.ok) hlsCode = await cdnResp.text();
+          try {
+            var cdnResp = await fetch("https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js");
+            if (cdnResp.ok) hlsCode = await cdnResp.text();
+          } catch (e2) {}
         }
-        if (!hlsCode) return new Response("HLS.js not found", { status: 404, headers: corsHeaders });
+        if (!hlsCode) {
+          hlsCode = '(function(){var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";s.onload=function(){if(window.onHlsReady)window.onHlsReady()};document.head.appendChild(s)})()';
+        }
         return new Response(hlsCode, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=86400" }) });
       } catch (e) {
-        return new Response("HLS.js not found", { status: 404, headers: corsHeaders });
+        var fallback = '(function(){var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";document.head.appendChild(s)})()';
+        return new Response(fallback, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/javascript; charset=utf-8" }) });
       }
     }
 
