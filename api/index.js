@@ -768,9 +768,9 @@ async function handleRequest(request) {
               var mpH = "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
               var proxiedM3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(s.m3u8) + mpH;
               var proxiedTracks = (s.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + mpH }); });
-              var cfg = { source: "megaplay", type: lang, m3u8: proxiedM3u8, tracks: proxiedTracks, intro: s.intro || null, outro: s.outro || null, title: animeTitle };
+              var cfg = { source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle };
               var hash = toBase64(JSON.stringify(cfg));
-              result.megaplay.push(Object.assign({}, cfg, { embedUrl: "/api/watch-embed/" + hash }));
+              result.megaplay.push(Object.assign({}, cfg, { m3u8: proxiedM3u8, tracks: proxiedTracks, embedUrl: "/api/watch-embed/" + hash }));
             }
           }
         } catch {}
@@ -874,10 +874,19 @@ async function handleRequest(request) {
 
     if (url === "/api/hls.js" || url === "/api/hls.min.js") {
       try {
-        var fs = require("fs");
-        var path = require("path");
-        var hlsPath = path.join(__dirname, "hls.min.js");
-        var hlsCode = fs.readFileSync(hlsPath, "utf8");
+        var hlsCode = null;
+        try {
+          if (typeof require !== "undefined") {
+            var fs = require("fs");
+            var path = require("path");
+            hlsCode = fs.readFileSync(path.join(__dirname, "hls.min.js"), "utf8");
+          }
+        } catch (e) {}
+        if (!hlsCode) {
+          var cdnResp = await fetch("https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js");
+          if (cdnResp.ok) hlsCode = await cdnResp.text();
+        }
+        if (!hlsCode) return new Response("HLS.js not found", { status: 404, headers: corsHeaders });
         return new Response(hlsCode, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=86400" }) });
       } catch (e) {
         return new Response("HLS.js not found", { status: 404, headers: corsHeaders });
@@ -915,3 +924,9 @@ if (typeof module !== "undefined" && module.exports) {
 }
 
 if (typeof module !== "undefined") module.exports = { handleRequest };
+
+if (typeof addEventListener !== "undefined") {
+  addEventListener("fetch", function(fetchEvent) {
+    fetchEvent.respondWith(handleRequest(fetchEvent.request));
+  });
+}

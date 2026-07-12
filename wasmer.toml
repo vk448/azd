@@ -1,0 +1,19 @@
+[package]
+name = "animezilla/animezilla"
+version = "0.1.0"
+description = "AnimeZilla - Anime Streaming API"
+readme = "README.md"
+
+[dependencies]
+"wasmer/winterjs" = "*"
+
+[fs]
+"/" = "."
+
+[[command]]
+name = "worker"
+module = "wasmer/winterjs:wasmer-winter"
+runner = "https://webc.org/runner/wasi"
+
+[command.annotations.wasi]
+main-args = ["/api/index.js"]
