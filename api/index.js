@@ -1,6 +1,5 @@
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
+function toBase64(str) { return btoa(str); }
+function fromBase64(str) { return atob(str); }
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MEGAPLAY_BASE = "https://megaplay.buzz";
@@ -578,7 +577,7 @@ async function scrapeNekoStream(malId, episode) {
           var playerUrl = d2.result.url;
           var hash = playerUrl.split("#")[1];
           if (!hash) continue;
-          var m3u8 = Buffer.from(hash, "base64").toString("utf8");
+          var m3u8 = fromBase64(hash);
           if (!m3u8.includes(".m3u8")) continue;
           var skip = d2.result.skip_data;
           output[lang] = Object.assign({}, base, {
@@ -714,27 +713,21 @@ function rewriteM3u8(content, baseUrl, serverHost) {
   }).join("\n");
 }
 
-var PORT = process.env.PORT || 5500;
-
-var server = http.createServer(async function(req, res) {
+async function handleRequest(request) {
   var corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, corsHeaders);
-    res.end();
-    return;
-  }
-
-  var fullUrl;
-  try { fullUrl = new URL(req.url, "http://" + (req.headers.host || "localhost")); } catch(e) { fullUrl = new URL(req.url, "http://localhost"); }
-  var url = decodeURIComponent(fullUrl.pathname);
+  var reqUrl = new URL(request.url);
+  var host = reqUrl.host || "localhost";
+  var proto = "https";
+  var serverHost = proto + "://" + host;
+  var url = decodeURIComponent(reqUrl.pathname);
 
   try {
-    // GET /api/anime-embed/:anilistId/episode/:episode
     var embedMatch = url.match(/^\/api\/anime-embed\/(\d+)\/episode\/(\d+)$/);
     if (embedMatch) {
       var anilistId = Number(embedMatch[1]);
@@ -763,7 +756,7 @@ var server = http.createServer(async function(req, res) {
             if (sources[lang]) {
               var s = sources[lang];
               var cfg = { source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle };
-              var hash = Buffer.from(JSON.stringify(cfg)).toString("base64");
+              var hash = toBase64(JSON.stringify(cfg));
               result.megaplay.push(Object.assign({}, cfg, { embedUrl: "/api/watch-embed/" + hash }));
             }
           }
@@ -782,60 +775,37 @@ var server = http.createServer(async function(req, res) {
             if (srv[lang2]) {
               var s2 = srv[lang2];
               var cfg2 = { source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: s2.m3u8, tracks: s2.tracks || [], intro: s2.intro || null, outro: s2.outro || null, title: animeTitle };
-              var hash2 = Buffer.from(JSON.stringify(cfg2)).toString("base64");
+              var hash2 = toBase64(JSON.stringify(cfg2));
               result.anikage.push(Object.assign({}, cfg2, { embedUrl: "/api/ak/embed/" + hash2 }));
             }
           }
         }
       } catch {}
-      res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": "application/json" }));
-      res.end(JSON.stringify(result));
-      return;
+      return new Response(JSON.stringify(result), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
-    // GET /api/watch-embed/:hash
     var watchMatch = url.match(/^\/api\/watch-embed\/([A-Za-z0-9+/=]+)$/);
     if (watchMatch) {
       var wHash = watchMatch[1];
       var wConfig = {};
-      try { wConfig = JSON.parse(Buffer.from(wHash, "base64").toString()); } catch {}
-      var host = req.headers.host || "localhost";
-      var proto = req.headers["x-forwarded-proto"] || "http";
-      var serverHost = proto + "://" + host;
+      try { wConfig = JSON.parse(fromBase64(wHash)); } catch {}
       wConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wConfig.m3u8);
-      if (wConfig.tracks) {
-        wConfig.tracks = wConfig.tracks.map(function(t) {
-          return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) });
-        });
-      }
+      if (wConfig.tracks) { wConfig.tracks = wConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) }); }); }
       var playerPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wConfig) + ";</script></head>");
-      res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }));
-      res.end(playerPage);
-      return;
+      return new Response(playerPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
-    // GET /api/ak/embed/:hash
     var akMatch = url.match(/^\/api\/ak\/embed\/([A-Za-z0-9+/=]+)$/);
     if (akMatch) {
       var aHash = akMatch[1];
       var aConfig = {};
-      try { aConfig = JSON.parse(Buffer.from(aHash, "base64").toString()); } catch {}
-      var hostA = req.headers.host || "localhost";
-      var protoA = req.headers["x-forwarded-proto"] || "http";
-      var serverHostA = protoA + "://" + hostA;
-      aConfig.m3u8 = serverHostA + "/api/proxy/m3u8?url=" + encodeURIComponent(aConfig.m3u8);
-      if (aConfig.tracks) {
-        aConfig.tracks = aConfig.tracks.map(function(t) {
-          return Object.assign({}, t, { file: serverHostA + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) });
-        });
-      }
+      try { aConfig = JSON.parse(fromBase64(aHash)); } catch {}
+      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(aConfig.m3u8);
+      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) }); }); }
       var playerPageA = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(aConfig) + ";</script></head>");
-      res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }));
-      res.end(playerPageA);
-      return;
+      return new Response(playerPageA, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
-    // GET /api/download/:anilistId/episode/:episode
     var dlMatch = url.match(/^\/api\/download\/(\d+)\/episode\/(\d+)$/);
     if (dlMatch) {
       var anilistId = Number(dlMatch[1]);
@@ -852,58 +822,64 @@ var server = http.createServer(async function(req, res) {
       if (malId) { try { downloads = await getDownloadLinks(malId, episode); } catch {} }
       var dlData = { title: animeTitle, image: image, episode: episode, sub: downloads.sub || [], dub: downloads.dub || [] };
       var dlPage = DOWNLOAD_HTML.replace("</head>", '<script>window.__DL_DATA__=' + JSON.stringify(dlData) + ";</script></head>");
-      res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }));
-      res.end(dlPage);
-      return;
+      return new Response(dlPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
     if (url === "/api/proxy/m3u8") {
-      var targetUrl = fullUrl.searchParams.get("url");
-      if (!targetUrl) { res.writeHead(400); res.end("Missing url param"); return; }
+      var targetUrl = reqUrl.searchParams.get("url");
+      if (!targetUrl) return new Response("Missing url param", { status: 400 });
       var r = await fetch(targetUrl, { headers: Object.assign({}, CDN_HEADERS) });
       var contentType = r.headers.get("content-type") || "";
       var isM3u8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8") || targetUrl.endsWith(".m3u8");
       if (!r.ok) {
-        res.writeHead(r.status, Object.assign({}, corsHeaders, { "Content-Type": contentType || "text/plain" }));
-        var err = await r.text(); res.end(err); return;
+        var err = await r.text();
+        return new Response(err, { status: r.status, headers: Object.assign({}, corsHeaders, { "Content-Type": contentType || "text/plain" }) });
       }
       if (isM3u8) {
-        res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": "application/vnd.apple.mpegurl" }));
         var body = await r.text();
-        var host2 = req.headers.host || "localhost";
-        var proto2 = req.headers["x-forwarded-proto"] || "http";
-        var serverHost2 = proto2 + "://" + host2;
-        res.end(rewriteM3u8(body, targetUrl, serverHost2));
+        var rewritten = rewriteM3u8(body, targetUrl, serverHost);
+        return new Response(rewritten, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/vnd.apple.mpegurl" }) });
       } else {
-        var buf = Buffer.from(await r.arrayBuffer());
+        var buf = new Uint8Array(await r.arrayBuffer());
         var ct2 = contentType || "application/octet-stream";
         if (targetUrl.includes(".vtt") || targetUrl.includes("/subtitles/")) ct2 = "text/vtt; charset=utf-8";
         else if (targetUrl.includes(".ts")) ct2 = "video/mp2t";
-        res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": ct2 }));
-        res.end(buf);
+        return new Response(buf, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": ct2 }) });
       }
-      return;
     }
 
     if (url === "/api/health") {
-      res.writeHead(200, Object.assign({}, corsHeaders, { "Content-Type": "application/json" }));
-      res.end(JSON.stringify({ ok: true, time: Date.now() }));
-      return;
+      return new Response(JSON.stringify({ ok: true, time: Date.now() }), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
-    res.writeHead(404, corsHeaders);
-    res.end("Not found");
+    return new Response("Not found", { status: 404, headers: corsHeaders });
   } catch (e) {
-    res.writeHead(500, Object.assign({}, corsHeaders, { "Content-Type": "application/json" }));
-    res.end(JSON.stringify({ ok: false, error: e.message }));
+    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
   }
-});
+}
 
-server.listen(PORT, function() {
-  console.log("Server: http://127.0.0.1:" + PORT);
-  console.log("  GET /api/anime-embed/:anilistId/episode/:episode");
-  console.log("  GET /api/watch-embed/:hash");
-  console.log("  GET /api/ak/embed/:hash");
-  console.log("  GET /api/download/:anilistId/episode/:episode");
-  console.log("  GET /api/proxy/m3u8?url=X");
-});
+if (typeof module !== "undefined" && module.exports) {
+  try {
+    var http = require("http");
+    var PORT = process.env.PORT || 5500;
+    var server = http.createServer(function(req, res) {
+      var fullUrl;
+      try { fullUrl = new URL(req.url, "http://" + (req.headers.host || "localhost")); } catch(e) { fullUrl = new URL(req.url, "http://localhost"); }
+      var headers = {};
+      for (var k in req.headers) headers[k] = req.headers[k];
+      if (req.headers["x-forwarded-proto"]) headers["x-forwarded-proto"] = req.headers["x-forwarded-proto"];
+      handleRequest(new Request(fullUrl.href, { method: req.method, headers: headers })).then(function(response) {
+        var respHeaders = {};
+        response.headers.forEach(function(v, k) { respHeaders[k] = v; });
+        res.writeHead(response.status, respHeaders);
+        response.arrayBuffer().then(function(buf) { res.end(Buffer.from(buf)); }).catch(function() { res.end(); });
+      }).catch(function(e) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      });
+    });
+    server.listen(PORT, function() { console.log("Server: http://127.0.0.1:" + PORT); });
+  } catch(e) {}
+}
+
+if (typeof module !== "undefined") module.exports = { handleRequest };
