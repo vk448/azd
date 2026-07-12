@@ -1,3 +1,9 @@
 kind: wasmer.io/App.v0
 name: animezilla
 package: ./wasmer.toml
+
+capabilities:
+  instaboot:
+    requests:
+      - path: /api/health
+    max_age: 5m
