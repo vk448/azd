@@ -601,7 +601,27 @@ const PLAYER_HTML = `<!DOCTYPE html>
   volWrap.addEventListener("mouseleave",function(){volWrap.classList.remove("active")});
 
   pipBtn.addEventListener("click",async function(){try{if(document.pictureInPictureElement)await document.exitPictureInPicture();else await video.requestPictureInPicture()}catch(e){}});
-  fullBtn.addEventListener("click",function(){if(!document.fullscreenElement)videoArea.requestFullscreen().catch(function(){});else document.exitFullscreen()});
+  fullBtn.addEventListener("click",function(){
+    if(!document.fullscreenElement) {
+      videoArea.requestFullscreen().catch(function(){});
+    } else {
+      document.exitFullscreen().catch(function(){});
+    }
+  });
+
+  document.addEventListener("fullscreenchange", function() {
+    if (document.fullscreenElement === videoArea) {
+      if (screen.orientation && typeof screen.orientation.lock === "function") {
+        screen.orientation.lock("landscape").catch(function(err) {
+          console.log("Orientation lock error:", err);
+        });
+      }
+    } else {
+      if (screen.orientation && typeof screen.orientation.unlock === "function") {
+        try { screen.orientation.unlock(); } catch(e) {}
+      }
+    }
+  });
 
   document.addEventListener("keydown",function(e){
     if(e.code==="Space"){e.preventDefault();togglePlay()}
