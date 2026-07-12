@@ -758,7 +758,7 @@ async function handleRequest(request) {
           if (ar.ok) { var ad = await ar.json(); var t = ad.anime && ad.anime.title; animeTitle = (t && (t.english || t.romaji || t.userPreferred || t.native)) || ""; }
         } catch {}
       }
-      var result = { ok: true, id: anilistId, mal: malId, ep: episode, title: animeTitle, sources: [], downloads: null };
+      var result = { success: true, anilistId: anilistId, malId: malId, ep: episode, title: animeTitle, sources: [], downloads: null };
       if (malId) {
         try {
           var sources = await scrapeBoth(malId, episode);
@@ -767,9 +767,9 @@ async function handleRequest(request) {
             var lang = langKeys[li];
             if (sources[lang]) {
               var s = sources[lang];
-              var cfg = { src: "mega", lang: lang, intro: s.intro || null, outro: s.outro || null };
+              var cfg = { source: "megaplay", type: lang, m3u8: null, tracks: null, intro: s.intro || null, outro: s.outro || null, label: animeTitle + " " + lang.toUpperCase() + " (MegaPlay)" };
               var hash = toBase64(JSON.stringify({ source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle }));
-              cfg.url = "/api/watch-embed/" + hash;
+              cfg.embedUrl = serverHost + "/api/watch-embed/" + hash;
               result.sources.push(cfg);
             }
           }
@@ -787,12 +787,12 @@ async function handleRequest(request) {
             var lang2 = langKeys2[li2];
             if (srv[lang2]) {
               var s2 = srv[lang2];
-              var cfg2 = { src: "aki", srv: serverNames[si], lang: lang2, quality: s2.quality, intro: s2.intro || null, outro: s2.outro || null };
+              var cfg2 = { source: "anikage", server: serverNames[si], type: lang2, quality: s2.quality, m3u8: null, tracks: null, intro: s2.intro || null, outro: s2.outro || null, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")" };
               var rawM3u8 = s2.m3u8;
               try { var pu = new URL(s2.m3u8); if (pu.hostname === "megacloud.animanga.fun") rawM3u8 = pu.searchParams.get("url") || s2.m3u8; } catch {}
               var rawTracks = (s2.tracks || []).map(function(t) { try { var tu = new URL(t.file); if (tu.hostname === "megacloud.animanga.fun") return Object.assign({}, t, { file: tu.searchParams.get("url") || t.file }); } catch {} return t; });
               var hash2 = toBase64(JSON.stringify({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: rawM3u8, tracks: rawTracks, intro: s2.intro || null, outro: s2.outro || null, title: animeTitle }));
-              cfg2.url = "/api/ak/embed/" + hash2;
+              cfg2.embedUrl = serverHost + "/api/ak/embed/" + hash2;
               result.sources.push(cfg2);
             }
           }
