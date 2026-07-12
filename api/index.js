@@ -877,7 +877,7 @@ async function handleRequest(request) {
       try {
         var hlsCode = null;
         try {
-          if (typeof require !== "undefined") {
+          if (typeof require === "function") {
             var fs = require("fs");
             var path = require("path");
             hlsCode = fs.readFileSync(path.join(__dirname, "hls.min.js"), "utf8");
@@ -933,6 +933,15 @@ if (typeof module !== "undefined") module.exports = { handleRequest };
 
 if (typeof addEventListener !== "undefined") {
   addEventListener("fetch", function(fetchEvent) {
-    fetchEvent.respondWith(handleRequest(fetchEvent.request));
+    fetchEvent.respondWith((async function() {
+      try {
+        if (typeof handleRequest !== "function") {
+          return new Response(JSON.stringify({ error: "Service initializing, retry in 2s" }), { status: 503, headers: { "Content-Type": "application/json", "Retry-After": "2", "Access-Control-Allow-Origin": "*" } });
+        }
+        return await handleRequest(fetchEvent.request);
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message || "Internal error" }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+      }
+    })());
   });
 }
