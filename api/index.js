@@ -1,5 +1,151 @@
-function toBase64(str) { return btoa(str); }
-function fromBase64(str) { return atob(str); }
+// Polyfills & Fallbacks for WinterJS / Edge runtimes
+if (typeof Object.assign !== 'function') {
+  Object.assign = function(target) {
+    if (target == null) { throw new TypeError('Cannot convert undefined or null to object'); }
+    var to = Object(target);
+    for (var index = 1; index < arguments.length; index++) {
+      var nextSource = arguments[index];
+      if (nextSource != null) {
+        for (var nextKey in nextSource) {
+          if (Object.prototype.hasOwnProperty.call(nextSource, nextKey)) {
+            to[nextKey] = nextSource[nextKey];
+          }
+        }
+      }
+    }
+    return to;
+  };
+}
+
+if (typeof Object.entries !== "function") {
+  Object.entries = function(obj) {
+    var ownProps = Object.keys(obj), i = ownProps.length, resArray = new Array(i);
+    while (i--) resArray[i] = [ownProps[i], obj[ownProps[i]]];
+    return resArray;
+  };
+}
+
+if (typeof Object.values !== "function") {
+  Object.values = function(obj) {
+    var ownProps = Object.keys(obj), i = ownProps.length, resArray = new Array(i);
+    while (i--) resArray[i] = obj[ownProps[i]];
+    return resArray;
+  };
+}
+
+if (typeof Promise.allSettled !== "function") {
+  Promise.allSettled = function(promises) {
+    return Promise.all(
+      promises.map(function(p) {
+        return Promise.resolve(p).then(
+          function(v) { return { status: "fulfilled", value: v }; },
+          function(e) { return { status: "rejected", reason: e }; }
+        );
+      })
+    );
+  };
+}
+
+if (typeof Array.prototype.find !== "function") {
+  Array.prototype.find = function(predicate) {
+    if (this == null) { throw new TypeError('Array.prototype.find called on null or undefined'); }
+    if (typeof predicate !== 'function') { throw new TypeError('predicate must be a function'); }
+    var list = Object(this);
+    var length = list.length >>> 0;
+    var thisArg = arguments[1];
+    var value;
+    for (var i = 0; i < length; i++) {
+      value = list[i];
+      if (predicate.call(thisArg, value, i, list)) { return value; }
+    }
+    return undefined;
+  };
+}
+
+if (typeof Array.prototype.some !== "function") {
+  Array.prototype.some = function(fun/*, thisArg*/) {
+    if (this == null) { throw new TypeError('Array.prototype.some called on null or undefined'); }
+    if (typeof fun !== 'function') { throw new TypeError(); }
+    var t = Object(this);
+    var len = t.length >>> 0;
+    var thisArg = arguments.length >= 2 ? arguments[1] : void 0;
+    for (var i = 0; i < len; i++) {
+      if (i in t && fun.call(thisArg, t[i], i, t)) { return true; }
+    }
+    return false;
+  };
+}
+
+if (typeof String.prototype.includes !== "function") {
+  String.prototype.includes = function(search, start) {
+    if (typeof start !== 'number') { start = 0; }
+    if (start + search.length > this.length) { return false; }
+    return this.indexOf(search, start) !== -1;
+  };
+}
+
+if (typeof Array.prototype.includes !== "function") {
+  Array.prototype.includes = function(searchElement, fromIndex) {
+    return this.indexOf(searchElement, fromIndex) !== -1;
+  };
+}
+
+if (typeof String.prototype.startsWith !== 'function') {
+  String.prototype.startsWith = function(searchString, position) {
+    position = position || 0;
+    return this.indexOf(searchString, position) === position;
+  };
+}
+
+if (typeof String.prototype.endsWith !== 'function') {
+  String.prototype.endsWith = function(searchString, position) {
+    if (position === undefined || position > this.length) { position = this.length; }
+    return this.substring(position - searchString.length, position) === searchString;
+  };
+}
+
+function toBase64(str) {
+  if (typeof btoa === "function") {
+    try { return btoa(str); } catch (e) {}
+  }
+  if (typeof Buffer === "function") {
+    try { return Buffer.from(str, "utf8").toString("base64"); } catch (e) {}
+  }
+  var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var encoded = "";
+  for (var i = 0; i < str.length; i += 3) {
+    var c1 = str.charCodeAt(i), c2 = i + 1 < str.length ? str.charCodeAt(i + 1) : NaN, c3 = i + 2 < str.length ? str.charCodeAt(i + 2) : NaN;
+    var byte1 = c1 >> 2;
+    var byte2 = ((c1 & 3) << 4) | (isNaN(c2) ? 0 : (c2 >> 4));
+    var byte3 = isNaN(c2) ? 64 : (((c2 & 15) << 2) | (isNaN(c3) ? 0 : (c3 >> 6)));
+    var byte4 = isNaN(c3) ? 64 : (c3 & 63);
+    encoded += chars.charAt(byte1) + chars.charAt(byte2) + (byte3 === 64 ? "=" : chars.charAt(byte3)) + (byte4 === 64 ? "=" : chars.charAt(byte4));
+  }
+  return encoded;
+}
+
+function fromBase64(str) {
+  if (typeof atob === "function") {
+    try { return atob(str); } catch (e) {}
+  }
+  if (typeof Buffer === "function") {
+    try { return Buffer.from(str, "base64").toString("utf8"); } catch (e) {}
+  }
+  var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var decoded = "";
+  str = str.replace(/=+$/, "");
+  for (var i = 0; i < str.length; i += 4) {
+    var b1 = chars.indexOf(str.charAt(i)), b2 = i + 1 < str.length ? chars.indexOf(str.charAt(i + 1)) : 0, b3 = i + 2 < str.length ? chars.indexOf(str.charAt(i + 2)) : 64, b4 = i + 3 < str.length ? chars.indexOf(str.charAt(i + 3)) : 64;
+    var c1 = (b1 << 2) | (b2 >> 4);
+    var c2 = ((b2 & 15) << 4) | (b3 >> 2);
+    var c3 = ((b3 & 3) << 6) | b4;
+    decoded += String.fromCharCode(c1);
+    if (b3 !== 64) decoded += String.fromCharCode(c2);
+    if (b4 !== 64) decoded += String.fromCharCode(c3);
+  }
+  return decoded;
+}
+
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MEGAPLAY_BASE = "https://megaplay.buzz";
@@ -906,34 +1052,56 @@ async function handleRequest(request) {
 
     return new Response("Not found", { status: 404, headers: corsHeaders });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+    return new Response(JSON.stringify({ ok: false, error: e.message, stack: e.stack }), { status: 500, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
   }
 }
 
 var _READY = false;
 
 if (typeof module !== "undefined" && module.exports) {
-  try {
-    var http = require("http");
-    var PORT = process.env.PORT || 5500;
-    var server = http.createServer(function(req, res) {
-      var fullUrl;
-      try { fullUrl = new URL(req.url, "http://" + (req.headers.host || "localhost")); } catch(e) { fullUrl = new URL(req.url, "http://localhost"); }
-      var headers = {};
-      for (var k in req.headers) headers[k] = req.headers[k];
-      if (req.headers["x-forwarded-proto"]) headers["x-forwarded-proto"] = req.headers["x-forwarded-proto"];
-      handleRequest(new Request(fullUrl.href, { method: req.method, headers: headers })).then(function(response) {
-        var respHeaders = {};
-        response.headers.forEach(function(v, k) { respHeaders[k] = v; });
+  var nodeHandler = async function(req, res) {
+    var fullUrl;
+    try { fullUrl = new URL(req.url, "http://" + (req.headers.host || "localhost")); } catch(e) { fullUrl = new URL(req.url, "http://localhost"); }
+    var headers = {};
+    for (var k in req.headers) headers[k] = req.headers[k];
+    if (req.headers["x-forwarded-proto"]) headers["x-forwarded-proto"] = req.headers["x-forwarded-proto"];
+
+    try {
+      var webReq = new Request(fullUrl.href, { method: req.method, headers: headers });
+      var response = await handleRequest(webReq);
+      var respHeaders = {};
+      response.headers.forEach(function(v, k) { respHeaders[k] = v; });
+
+      var buf = Buffer.from(await response.arrayBuffer());
+      if (typeof res.status === "function") {
+        for (var k in respHeaders) res.setHeader(k, respHeaders[k]);
+        res.status(response.status).send(buf);
+      } else if (typeof res.writeHead === "function") {
         res.writeHead(response.status, respHeaders);
-        response.arrayBuffer().then(function(buf) { res.end(Buffer.from(buf)); }).catch(function() { res.end(); });
-      }).catch(function(e) {
+        res.end(buf);
+      } else {
+        throw new Error("Response object has no status or writeHead method");
+      }
+    } catch(e) {
+      if (typeof res.status === "function") {
+        res.status(500).json({ ok: false, error: e.message, stack: e.stack });
+      } else if (typeof res.writeHead === "function") {
         res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: e.message }));
-      });
-    });
-    server.listen(PORT, function() { console.log("Server: http://127.0.0.1:" + PORT); });
-  } catch(e) {}
+        res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack }));
+      }
+    }
+  };
+
+  module.exports = nodeHandler;
+
+  if (require.main === module) {
+    try {
+      var http = require("http");
+      var PORT = process.env.PORT || 5500;
+      var server = http.createServer(nodeHandler);
+      server.listen(PORT, function() { console.log("Server: http://127.0.0.1:" + PORT); });
+    } catch(e) {}
+  }
 }
 
 if (typeof addEventListener !== "undefined") {
@@ -953,7 +1121,7 @@ if (typeof addEventListener !== "undefined") {
       try {
         return await handleRequest(req);
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message || "Internal error" }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+        return new Response(JSON.stringify({ error: e.message || "Internal error", stack: e.stack }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
       }
     })());
   });
