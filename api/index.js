@@ -727,7 +727,8 @@ async function handleRequest(request) {
   var corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+    "Access-Control-Max-Age": "86400",
   };
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
@@ -757,7 +758,7 @@ async function handleRequest(request) {
           if (ar.ok) { var ad = await ar.json(); var t = ad.anime && ad.anime.title; animeTitle = (t && (t.english || t.romaji || t.userPreferred || t.native)) || ""; }
         } catch {}
       }
-      var result = { ok: true, anilist_id: anilistId, mal_id: malId, episode: episode, title: animeTitle, megaplay: [], anikage: [] };
+      var result = { ok: true, id: anilistId, mal: malId, ep: episode, title: animeTitle, sources: [], downloads: null };
       if (malId) {
         try {
           var sources = await scrapeBoth(malId, episode);
@@ -766,12 +767,10 @@ async function handleRequest(request) {
             var lang = langKeys[li];
             if (sources[lang]) {
               var s = sources[lang];
-              var mpH = "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
-              var proxiedM3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(s.m3u8) + mpH;
-              var proxiedTracks = (s.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + mpH }); });
-              var cfg = { source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle };
-              var hash = toBase64(JSON.stringify(cfg));
-              result.megaplay.push(Object.assign({}, cfg, { m3u8: proxiedM3u8, tracks: proxiedTracks, embedUrl: "/api/watch-embed/" + hash }));
+              var cfg = { src: "mega", lang: lang, intro: s.intro || null, outro: s.outro || null };
+              var hash = toBase64(JSON.stringify({ source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle }));
+              cfg.url = "/api/watch-embed/" + hash;
+              result.sources.push(cfg);
             }
           }
         } catch {}
@@ -788,9 +787,10 @@ async function handleRequest(request) {
             var lang2 = langKeys2[li2];
             if (srv[lang2]) {
               var s2 = srv[lang2];
-              var cfg2 = { source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: s2.m3u8, tracks: s2.tracks || [], intro: s2.intro || null, outro: s2.outro || null, title: animeTitle };
-              var hash2 = toBase64(JSON.stringify(cfg2));
-              result.anikage.push(Object.assign({}, cfg2, { embedUrl: "/api/ak/embed/" + hash2 }));
+              var cfg2 = { src: "aki", srv: serverNames[si], lang: lang2, quality: s2.quality, intro: s2.intro || null, outro: s2.outro || null };
+              var hash2 = toBase64(JSON.stringify({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: s2.m3u8, tracks: s2.tracks || [], intro: s2.intro || null, outro: s2.outro || null, title: animeTitle }));
+              cfg2.url = "/api/ak/embed/" + hash2;
+              result.sources.push(cfg2);
             }
           }
         }
