@@ -788,7 +788,10 @@ async function handleRequest(request) {
             if (srv[lang2]) {
               var s2 = srv[lang2];
               var cfg2 = { src: "aki", srv: serverNames[si], lang: lang2, quality: s2.quality, intro: s2.intro || null, outro: s2.outro || null };
-              var hash2 = toBase64(JSON.stringify({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: s2.m3u8, tracks: s2.tracks || [], intro: s2.intro || null, outro: s2.outro || null, title: animeTitle }));
+              var rawM3u8 = s2.m3u8;
+              try { var pu = new URL(s2.m3u8); if (pu.hostname === "megacloud.animanga.fun") rawM3u8 = pu.searchParams.get("url") || s2.m3u8; } catch {}
+              var rawTracks = (s2.tracks || []).map(function(t) { try { var tu = new URL(t.file); if (tu.hostname === "megacloud.animanga.fun") return Object.assign({}, t, { file: tu.searchParams.get("url") || t.file }); } catch {} return t; });
+              var hash2 = toBase64(JSON.stringify({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: rawM3u8, tracks: rawTracks, intro: s2.intro || null, outro: s2.outro || null, title: animeTitle }));
               cfg2.url = "/api/ak/embed/" + hash2;
               result.sources.push(cfg2);
             }
@@ -815,8 +818,10 @@ async function handleRequest(request) {
       var aHash = akMatch[1];
       var aConfig = {};
       try { aConfig = JSON.parse(fromBase64(aHash)); } catch {}
-      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(aConfig.m3u8);
-      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) }); }); }
+      var ANI_HEADERS = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
+      function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS; }
+      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(aConfig.m3u8));
+      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) }); }); }
       var playerPageA = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(aConfig) + ";</script></head>");
       return new Response(playerPageA, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
