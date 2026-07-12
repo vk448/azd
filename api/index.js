@@ -19,6 +19,7 @@ const CDN_HEADERS = {
 };
 
 const ANIKAGE_PROXY_URL = "https://prox.anicore.tv";
+const ANIKAGE_MEGACLOUD_PROXY = "https://megacloud.animanga.fun/proxy";
 const ANIKAGE_API_BASE = "https://anikage.cc/api/media/anime";
 const ANIKAGE_HEADERS = {
   "User-Agent": UA,
@@ -27,10 +28,18 @@ const ANIKAGE_HEADERS = {
   "Accept": "application/json, text/plain, */*",
 };
 
+const ANIKAGE_PROXY_HEADERS = JSON.stringify({
+  "User-Agent": UA,
+  "Referer": "https://anikage.cc/",
+  "Origin": "https://anikage.cc",
+  "Accept": "*/*",
+});
+
 function anikageBuildProxyUrl(token, type) {
   if (!token) return "";
   if (token.startsWith("http://") || token.startsWith("https://")) return token;
-  return ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token;
+  var rawUrl = ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token;
+  return ANIKAGE_MEGACLOUD_PROXY + "?url=" + encodeURIComponent(rawUrl) + "&headers=" + encodeURIComponent(ANIKAGE_PROXY_HEADERS);
 }
 
 async function anikageGetServers(slug, episode) {
