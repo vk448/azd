@@ -404,7 +404,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .option-row.selected{color:var(--red);font-weight:600}
   .option-row .dot{width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red-glow);opacity:0}
   .option-row.selected .dot{opacity:1}
-  .skip-btn{background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px);margin-bottom:10px}
+  .skip-btn{position:absolute;bottom:100%;margin-bottom:10px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
   .skip-btn:hover{background:rgba(255,30,60,0.45);box-shadow:0 0 16px var(--red-glow-soft)}
   .skip-btn.show{display:block}
   .time-label{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums;padding:0 8px;min-width:92px}
