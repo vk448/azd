@@ -404,9 +404,8 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .option-row.selected{color:var(--red);font-weight:600}
   .option-row .dot{width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red-glow);opacity:0}
   .option-row.selected .dot{opacity:1}
-  .skip-btn{position:absolute;bottom:100%;margin-bottom:10px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
+  .skip-btn{position:absolute;bottom:100%;margin-bottom:10px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
   .skip-btn:hover{background:rgba(255,30,60,0.45);box-shadow:0 0 16px var(--red-glow-soft)}
-  .skip-btn.show{display:block}
   .time-label{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums;padding:0 8px;min-width:92px}
   @keyframes pulse{0%,100%{box-shadow:0 0 10px var(--red-glow),0 0 22px var(--red-glow-soft)}50%{box-shadow:0 0 16px var(--red-glow),0 0 34px var(--red-glow-soft)}}
   @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
@@ -582,9 +581,9 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
   function checkSkip(){
     var t=video.currentTime;
-    if(cfg.intro&&cfg.intro.start!==cfg.intro.end&&t>=cfg.intro.start&&t<cfg.intro.end){skipBtn.textContent="Skip Intro";skipBtn.classList.add("show");return}
-    if(cfg.outro&&cfg.outro.start!==cfg.outro.end&&t>=cfg.outro.start&&t<cfg.outro.end){skipBtn.textContent="Skip Outro";skipBtn.classList.add("show");return}
-    skipBtn.classList.remove("show");
+    if(cfg.intro&&cfg.intro.start!==cfg.intro.end&&t>=cfg.intro.start&&t<cfg.intro.end){skipBtn.textContent="Skip Intro";return}
+    if(cfg.outro&&cfg.outro.start!==cfg.outro.end&&t>=cfg.outro.start&&t<cfg.outro.end){skipBtn.textContent="Skip Outro";return}
+    skipBtn.textContent="Skip";
   }
   skipBtn.addEventListener("click",function(){
     var t=video.currentTime;
