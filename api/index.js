@@ -367,7 +367,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .controls{position:absolute;left:0;right:0;bottom:0;padding:12px 22px 16px;background:linear-gradient(to top,rgba(6,2,2,0.92) 0%,rgba(6,2,2,0.7) 50%,transparent 100%);opacity:0;transform:translateY(6px);transition:opacity .25s ease,transform .25s ease;z-index:7}
   .video-area:hover .controls,.video-area.show-controls .controls,.video-area.paused-state .controls{opacity:1;transform:translateY(0)}
   .video-area.hide-cursor{cursor:none}
-  .video-area.hide-cursor .controls,.video-area.hide-cursor .brand-mini,.video-area.hide-cursor .skip-btn{opacity:0;pointer-events:none}
+  .video-area.hide-cursor .controls,.video-area.hide-cursor .brand-mini{opacity:0;pointer-events:none}
   .seek-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
   .time{font-size:12px;color:var(--text-dim);font-variant-numeric:tabular-nums;min-width:42px;text-align:center}
   input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:rgba(255,255,255,0.12);border-radius:3px;outline:none;cursor:pointer}
@@ -404,8 +404,9 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .option-row.selected{color:var(--red);font-weight:600}
   .option-row .dot{width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red-glow);opacity:0}
   .option-row.selected .dot{opacity:1}
-  .skip-btn{position:absolute;bottom:100%;margin-bottom:10px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
+  .skip-btn{position:absolute;bottom:100%;margin-bottom:10px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
   .skip-btn:hover{background:rgba(255,30,60,0.45);box-shadow:0 0 16px var(--red-glow-soft)}
+  .skip-btn.show{display:block}
   .time-label{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums;padding:0 8px;min-width:92px}
   @keyframes pulse{0%,100%{box-shadow:0 0 10px var(--red-glow),0 0 22px var(--red-glow-soft)}50%{box-shadow:0 0 16px var(--red-glow),0 0 34px var(--red-glow-soft)}}
   @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
@@ -581,9 +582,9 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
   function checkSkip(){
     var t=video.currentTime;
-    if(cfg.intro&&cfg.intro.start!==cfg.intro.end&&t>=cfg.intro.start&&t<cfg.intro.end){skipBtn.textContent="Skip Intro";return}
-    if(cfg.outro&&cfg.outro.start!==cfg.outro.end&&t>=cfg.outro.start&&t<cfg.outro.end){skipBtn.textContent="Skip Outro";return}
-    skipBtn.textContent="Skip";
+    if(cfg.intro&&cfg.intro.start!==cfg.intro.end&&t>=cfg.intro.start&&t<cfg.intro.end){skipBtn.textContent="Skip Intro";skipBtn.classList.add("show");return}
+    if(cfg.outro&&cfg.outro.start!==cfg.outro.end&&t>=cfg.outro.start&&t<cfg.outro.end){skipBtn.textContent="Skip Outro";skipBtn.classList.add("show");return}
+    skipBtn.classList.remove("show");
   }
   skipBtn.addEventListener("click",function(){
     var t=video.currentTime;
