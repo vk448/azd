@@ -982,7 +982,7 @@ async function handleRequest(request) {
       return new Response(JSON.stringify(result), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
-    var watchMatch = url.match(/^\/api\/watch-embed\/([A-Za-z0-9+/=]+)$/);
+    var watchMatch = url.match(/^\/api\/watch-embed\/([-\w]+)$/);
     if (watchMatch) {
       var wHash = watchMatch[1];
       var wConfig = getConfig(wHash) || {};
@@ -993,7 +993,7 @@ async function handleRequest(request) {
       return new Response(playerPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
-    var akMatch = url.match(/^\/api\/ak\/embed\/([A-Za-z0-9+/=]+)$/);
+    var akMatch = url.match(/^\/api\/ak\/embed\/([-\w]+)$/);
     if (akMatch) {
       var aHash = akMatch[1];
       var aConfig = getConfig(aHash) || {};
