@@ -104,6 +104,17 @@ if (typeof String.prototype.endsWith !== 'function') {
   };
 }
 
+var CONFIG_STORE = {};
+var CONFIG_COUNTER = 0;
+function storeConfig(cfg) {
+  var id = (++CONFIG_COUNTER).toString(36);
+  CONFIG_STORE[id] = cfg;
+  return id;
+}
+function getConfig(id) {
+  return CONFIG_STORE[id] || null;
+}
+
 function toBase64(str) {
   if (typeof btoa === "function") {
     try { return btoa(str); } catch (e) {}
@@ -934,7 +945,7 @@ async function handleRequest(request) {
             if (sources[lang]) {
               var s = sources[lang];
               var cfg = { source: "megaplay", type: lang, m3u8: null, tracks: null, intro: s.intro || null, outro: s.outro || null, label: animeTitle + " " + lang.toUpperCase() + " (MegaPlay)" };
-              var hash = toBase64(JSON.stringify({ source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle }));
+              var hash = storeConfig({ source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle });
               cfg.embedUrl = serverHost + "/api/watch-embed/" + hash;
               result.sources.push(cfg);
             }
@@ -957,7 +968,7 @@ async function handleRequest(request) {
               var rawM3u8 = s2.m3u8;
               try { var pu = new URL(s2.m3u8); if (pu.hostname === "megacloud.animanga.fun") rawM3u8 = pu.searchParams.get("url") || s2.m3u8; } catch {}
               var rawTracks = (s2.tracks || []).map(function(t) { try { var tu = new URL(t.file); if (tu.hostname === "megacloud.animanga.fun") return Object.assign({}, t, { file: tu.searchParams.get("url") || t.file }); } catch {} return t; });
-              var hash2 = toBase64(JSON.stringify({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: rawM3u8, tracks: rawTracks, intro: s2.intro || null, outro: s2.outro || null, title: animeTitle }));
+              var hash2 = storeConfig({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: rawM3u8, tracks: rawTracks, intro: s2.intro || null, outro: s2.outro || null, title: animeTitle });
               cfg2.embedUrl = serverHost + "/api/ak/embed/" + hash2;
               result.sources.push(cfg2);
             }
@@ -970,8 +981,7 @@ async function handleRequest(request) {
     var watchMatch = url.match(/^\/api\/watch-embed\/([A-Za-z0-9+/=]+)$/);
     if (watchMatch) {
       var wHash = watchMatch[1];
-      var wConfig = {};
-      try { wConfig = JSON.parse(fromBase64(wHash)); } catch {}
+      var wConfig = getConfig(wHash) || {};
       var mpH = "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
       wConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wConfig.m3u8) + mpH;
       if (wConfig.tracks) { wConfig.tracks = wConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + mpH }); }); }
@@ -982,8 +992,7 @@ async function handleRequest(request) {
     var akMatch = url.match(/^\/api\/ak\/embed\/([A-Za-z0-9+/=]+)$/);
     if (akMatch) {
       var aHash = akMatch[1];
-      var aConfig = {};
-      try { aConfig = JSON.parse(fromBase64(aHash)); } catch {}
+      var aConfig = getConfig(aHash) || {};
       var ANI_HEADERS = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
       function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS; }
       aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(aConfig.m3u8));
