@@ -105,11 +105,15 @@ if (typeof String.prototype.endsWith !== 'function') {
 }
 
 var CONFIG_STORE = {};
-var CONFIG_COUNTER = 0;
+function simpleHash(str) {
+  var h = 0;
+  for (var i = 0; i < str.length; i++) { h = ((h << 5) - h + str.charCodeAt(i)) | 0; }
+  return (h >>> 0).toString(36);
+}
 function storeConfig(cfg) {
-  var id = (++CONFIG_COUNTER).toString(36);
-  CONFIG_STORE[id] = cfg;
-  return id;
+  var key = simpleHash(cfg.m3u8 || "") + "_" + (cfg.source || "") + "_" + (cfg.type || "");
+  CONFIG_STORE[key] = cfg;
+  return key;
 }
 function getConfig(id) {
   return CONFIG_STORE[id] || null;
