@@ -18,6 +18,16 @@ const CDN_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
   "Referer": "https://megaplay.buzz/",
   "Origin": "https://megaplay.buzz",
+  "Accept": "*/*",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "identity",
+  "Connection": "keep-alive",
+  "DNT": "1",
+  "Sec-Fetch-Dest": "empty",
+  "Sec-Fetch-Mode": "cors",
+  "Sec-Fetch-Site": "same-site",
+  "Pragma": "no-cache",
+  "Cache-Control": "no-cache",
 };
 
 const ANIKAGE_HEADERS = {
@@ -60,8 +70,20 @@ async function proxyFetch(url, opts = {}) {
   if (u.hostname.includes("anicore.tv") || u.hostname.includes("anikage.cc") || u.hostname.includes("anizara.store")) {
     headers = { ...ANIKAGE_HEADERS };
   }
-  const r = await fetch(url, { headers: { ...headers, ...opts.headers } });
-  return r;
+  headers = { ...headers, ...opts.headers };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(url, { headers, redirect: "follow" });
+      if (r.ok || r.status < 500) return r;
+    } catch (e) { if (attempt === 1) throw e; }
+    // Rotate UA on retry
+    headers["User-Agent"] = headers["User-Agent"].includes("Chrome/131")
+      ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return await fetch(url, { headers });
 }
 
 function rewriteM3u8(content, baseUrl, serverHost) {
@@ -253,9 +275,23 @@ const server = http.createServer(async (req, res) => {
         return res.end("Missing url param");
       }
 
+      // Proxy cache check
+      const pKey = "p-" + targetUrl;
+      const pCached = cacheGet(pKey);
+      if (pCached) {
+        cors(res);
+        if (typeof pCached === "string") {
+          res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=60" });
+          return res.end(pCached);
+        }
+        const hdrs = pCached.headers || { "Content-Type": "application/octet-stream" };
+        res.writeHead(200, { ...hdrs, "Cache-Control": "public, max-age=300" });
+        return res.end(pCached.buf);
+      }
+
       const r = await proxyFetch(targetUrl);
       const contentType = r.headers.get("content-type") || "";
-      const isM3u8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8") || targetUrl.endsWith(".m3u8");
+      const isM3u8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8") || targetUrl.endsWith(".m3u8") || (contentType === "" && targetUrl.includes("m3u8"));
 
       cors(res);
 
@@ -266,19 +302,23 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (isM3u8) {
-        res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
         const body = await r.text();
         const host = req.headers.host || "localhost";
         const proto = req.headers["x-forwarded-proto"] || "http";
         const serverHost = `${proto}://${host}`;
-        return res.end(rewriteM3u8(body, targetUrl, serverHost));
+        const rewritten = rewriteM3u8(body, targetUrl, serverHost);
+        cacheSet(pKey, rewritten);
+        res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=60" });
+        return res.end(rewritten);
       }
 
       const buf = Buffer.from(await r.arrayBuffer());
       var ct = contentType || "application/octet-stream";
       if (targetUrl.includes(".vtt") || targetUrl.includes("/subtitles/")) ct = "text/vtt; charset=utf-8";
       else if (targetUrl.includes(".ts")) ct = "video/mp2t";
-      res.writeHead(200, { "Content-Type": ct });
+      else if (targetUrl.includes(".m4s") || targetUrl.includes("/seg-") || targetUrl.includes("/chunk-")) ct = "video/mp4";
+      cacheSet(pKey, { buf, headers: { "Content-Type": ct } });
+      res.writeHead(200, { "Content-Type": ct, "Cache-Control": "public, max-age=300" });
       res.end(buf);
       return;
     }

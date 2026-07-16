@@ -181,6 +181,15 @@ const CDN_HEADERS = {
   "Referer": "https://megaplay.buzz/",
   "Origin": "https://megaplay.buzz",
   "Accept": "*/*",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "identity",
+  "Connection": "keep-alive",
+  "DNT": "1",
+  "Sec-Fetch-Dest": "empty",
+  "Sec-Fetch-Mode": "cors",
+  "Sec-Fetch-Site": "same-site",
+  "Pragma": "no-cache",
+  "Cache-Control": "no-cache",
 };
 
 const ANIKAGE_PROXY_URL = "https://prox.anicore.tv";
@@ -1072,9 +1081,28 @@ async function handleRequest(request) {
       if (customHeaders) {
         try { var parsed = JSON.parse(customHeaders); Object.assign(fetchHeaders, parsed); } catch {}
       }
-      var r = await fetch(targetUrl, { headers: fetchHeaders });
+
+      // Check proxy cache
+      var pCacheKey = "p-" + targetUrl;
+      var pCached = getScrapeCache(pCacheKey);
+      if (pCached) return new Response(pCached.body, { status: 200, headers: Object.assign({}, corsHeaders, pCached.headers) });
+
+      // Attempt fetch with retry
+      var r = null;
+      for (var pTry = 0; pTry < 2; pTry++) {
+        try {
+          r = await fetch(targetUrl, { headers: fetchHeaders, redirect: "follow" });
+          if (r.ok || r.status < 500) break;
+        } catch (e) { if (pTry === 1) throw e; }
+        // Wait 1s before retry
+        await new Promise(function(rs) { setTimeout(rs, 1000); });
+        // Rotate User-Agent on retry
+        fetchHeaders["User-Agent"] = UA.indexOf("Chrome/131") > -1 ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" : UA;
+      }
+      if (!r) return new Response("Fetch failed", { status: 502, headers: corsHeaders });
+
       var contentType = r.headers.get("content-type") || "";
-      var isM3u8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8") || targetUrl.endsWith(".m3u8");
+      var isM3u8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8") || targetUrl.endsWith(".m3u8") || (contentType === "" && targetUrl.includes("m3u8"));
       if (!r.ok) {
         var err = await r.text();
         return new Response(err, { status: r.status, headers: Object.assign({}, corsHeaders, { "Content-Type": contentType || "text/plain" }) });
@@ -1083,13 +1111,21 @@ async function handleRequest(request) {
         var body = await r.text();
         var hParam = customHeaders ? "&headers=" + encodeURIComponent(customHeaders) : "";
         var rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
-        return new Response(rewritten, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/vnd.apple.mpegurl" }) });
+        var respHeaders = { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=60" };
+        Object.assign(respHeaders, corsHeaders);
+        // Cache rewritten m3u8 for 60s
+        cacheScrape(pCacheKey, { body: rewritten, headers: respHeaders });
+        return new Response(rewritten, { status: 200, headers: respHeaders });
       } else {
         var buf = new Uint8Array(await r.arrayBuffer());
         var ct2 = contentType || "application/octet-stream";
         if (targetUrl.includes(".vtt") || targetUrl.includes("/subtitles/")) ct2 = "text/vtt; charset=utf-8";
         else if (targetUrl.includes(".ts")) ct2 = "video/mp2t";
-        return new Response(buf, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": ct2 }) });
+        else if (targetUrl.includes(".m4s") || targetUrl.includes("/seg-") || targetUrl.includes("/chunk-")) ct2 = "video/mp4";
+        var segHeaders = { "Content-Type": ct2, "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*" };
+        // Cache segments for 5 min
+        cacheScrape(pCacheKey, { body: buf, headers: segHeaders });
+        return new Response(buf, { status: 200, headers: segHeaders });
       }
     }
 
