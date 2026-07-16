@@ -125,7 +125,7 @@ const server = http.createServer(async (req, res) => {
       if (!malId) {
         try {
           const gql = JSON.stringify({ query: `{ Media(id:${anilistId},type:ANIME){ id title{romaji english native} idMal synonyms } }` });
-          const r = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: gql });
+          const r = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }, body: gql });
           const d = await r.json();
           const m = d.data && d.data.Media;
           if (m) {
@@ -335,7 +335,7 @@ const server = http.createServer(async (req, res) => {
       if (!wMalId) {
         try {
           const wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
-          const wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql });
+          const wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }, body: wGql });
           const wGd = await wGr.json();
           const wGm = wGd.data && wGd.data.Media;
           if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheSet("al-" + wAnilistId, { malId: wMalId, title: wTitle }); }
@@ -371,7 +371,7 @@ const server = http.createServer(async (req, res) => {
       if (!wTitle2) {
         try {
           const wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ title{romaji english} } }" });
-          const wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql2 });
+          const wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }, body: wGql2 });
           const wGd2 = await wGr2.json();
           const wGm2 = wGd2.data && wGd2.data.Media;
           if (wGm2) { wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || ""; cacheSet("al-" + wAnilistId2, { title: wTitle2 }); }

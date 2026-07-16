@@ -968,7 +968,7 @@ async function handleRequest(request) {
         var cacheKey = "al-" + anilistId;
         var cached = getScrapeCache(cacheKey);
         if (cached) return Promise.resolve(cached);
-        return fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english native} } }" }) }).then(function(r) { return r.json(); }).then(function(gd) { var gm = gd.data && gd.data.Media; if (gm) { var info = { malId: gm.idMal, title: gm.title && (gm.title.english || gm.title.romaji || gm.title.native) || "" }; cacheScrape(cacheKey, info); return info; } return { malId: null, title: "" }; }).catch(function() { return { malId: null, title: "" }; });
+        return fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english native} } }" }) }).then(function(r) { return r.json(); }).then(function(gd) { var gm = gd.data && gd.data.Media; if (gm) { var info = { malId: gm.idMal, title: gm.title && (gm.title.english || gm.title.romaji || gm.title.native) || "" }; cacheScrape(cacheKey, info); return info; } return { malId: null, title: "" }; }).catch(function() { return { malId: null, title: "" }; });
       })();
 
       // Run anikage scraper in parallel (doesn't need malId)
@@ -1061,7 +1061,7 @@ async function handleRequest(request) {
       var malId = null, animeTitle = "Unknown", image = "";
       try {
         var gql = JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english} coverImage{large} } }" });
-        var dr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: gql });
+        var dr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: gql });
         var dd = await dr.json();
         var dm = dd.data && dd.data.Media;
         if (dm) { malId = dm.idMal; animeTitle = dm.title && (dm.title.english || dm.title.romaji) || "Unknown"; image = dm.coverImage && dm.coverImage.large || ""; }
@@ -1171,7 +1171,7 @@ async function handleRequest(request) {
       if (!wMalId) {
         try {
           var wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
-          var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql });
+          var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
           var wGd = await wGr.json();
           var wGm = wGd.data && wGd.data.Media;
           if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + wAnilistId, { malId: wMalId, title: wTitle }); }
@@ -1201,7 +1201,7 @@ async function handleRequest(request) {
       if (!wTitle2) {
         try {
           var wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ title{romaji english} } }" });
-          var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql2 });
+          var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql2 });
           var wGd2 = await wGr2.json();
           var wGm2 = wGd2.data && wGd2.data.Media;
           if (wGm2) { wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || ""; cacheScrape("al-" + wAnilistId2, { malId: null, title: wTitle2 }); }
