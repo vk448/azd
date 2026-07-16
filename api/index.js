@@ -119,6 +119,11 @@ function getConfig(id) {
   return CONFIG_STORE[id] || null;
 }
 
+var SCRAPE_CACHE = {};
+var SCRAPE_CACHE_TTL = 5 * 60 * 1000;
+function cacheScrape(key, data) { SCRAPE_CACHE[key] = { ts: Date.now(), data: data }; }
+function getScrapeCache(key) { var e = SCRAPE_CACHE[key]; if (e && Date.now() - e.ts < SCRAPE_CACHE_TTL) return e.data; return null; }
+
 function toBase64(str) {
   if (typeof btoa === "function") {
     try { return btoa(str); } catch (e) {}
@@ -209,56 +214,63 @@ async function anikageGetSources(slug, episode, provider, lang) {
 }
 
 async function scrapeAnikage(slugOrId, episode) {
+  var cacheKey = "ak-" + slugOrId + "-" + episode;
+  var cached = getScrapeCache(cacheKey);
+  if (cached) return cached;
+
   var serversData = await anikageGetServers(slugOrId, episode);
   var servers = serversData.servers || [];
   var results = { neko: { sub: null, dub: null }, koto: { sub: null, dub: null }, serverList: servers.map(function(s) { return s.id; }) };
   var targetServers = ["neko", "koto"];
 
+  var tasks = [];
   for (var si = 0; si < targetServers.length; si++) {
     var serverId = targetServers[si];
     var server = servers.find(function(s) { return s.id === serverId; });
     if (!server) continue;
-
     var langs = ["sub", "dub"];
     for (var li = 0; li < langs.length; li++) {
       var lang = langs[li];
       if (!server.subTypes.includes(lang)) continue;
-
-      try {
-        var srcData = await anikageGetSources(slugOrId, episode, serverId, lang);
-        if (!srcData.sources || srcData.sources.length === 0) continue;
-
-        var bestSource = null;
-        var softsubs = srcData.sources.filter(function(s) { return s.type === "softsub" && s.isM3U8; });
-        var hardsubs = srcData.sources.filter(function(s) { return s.type === "hardsub" && s.isM3U8; });
-        var dubs = srcData.sources.filter(function(s) { return s.type === "dub" && s.isM3U8; });
-        var allM3u8 = srcData.sources.filter(function(s) { return s.isM3U8; });
-
-        if (lang === "dub" && dubs.length > 0) bestSource = dubs[0];
-        else if (softsubs.length > 0) bestSource = softsubs[0];
-        else if (hardsubs.length > 0) bestSource = hardsubs[0];
-        else if (allM3u8.length > 0) bestSource = allM3u8[0];
-
-        if (!bestSource) continue;
-
-        var m3u8Url = anikageBuildProxyUrl(bestSource.url, "m3u8");
-        var tracks = (srcData.subtitles || []).map(function(sub) {
-          return { file: anikageBuildProxyUrl(sub.file, "m3u8"), label: sub.label, kind: sub.kind, default: sub.default };
-        });
-
-        results[serverId][lang] = {
-          m3u8: m3u8Url, tracks: tracks,
-          intro: srcData.intro || { start: 0, end: 0 },
-          outro: srcData.outro || { start: 0, end: 0 },
-          server: serverId, source: bestSource.type, quality: bestSource.quality,
-          allSources: srcData.sources.map(function(s) {
-            return { url: anikageBuildProxyUrl(s.url, "m3u8"), quality: s.quality, type: s.type, embedUrl: s.embedUrl };
-          }),
-        };
-      } catch (e) {}
+      tasks.push({ serverId: serverId, lang: lang, slugOrId: slugOrId, episode: episode });
     }
   }
 
+  var taskResults = await Promise.allSettled(tasks.map(function(t) {
+    return anikageGetSources(t.slugOrId, t.episode, t.serverId, t.lang).then(function(srcData) {
+      if (!srcData.sources || srcData.sources.length === 0) return null;
+      var bestSource = null;
+      var softsubs = srcData.sources.filter(function(s) { return s.type === "softsub" && s.isM3U8; });
+      var hardsubs = srcData.sources.filter(function(s) { return s.type === "hardsub" && s.isM3U8; });
+      var dubs = srcData.sources.filter(function(s) { return s.type === "dub" && s.isM3U8; });
+      var allM3u8 = srcData.sources.filter(function(s) { return s.isM3U8; });
+      if (t.lang === "dub" && dubs.length > 0) bestSource = dubs[0];
+      else if (softsubs.length > 0) bestSource = softsubs[0];
+      else if (hardsubs.length > 0) bestSource = hardsubs[0];
+      else if (allM3u8.length > 0) bestSource = allM3u8[0];
+      if (!bestSource) return null;
+      return {
+        serverId: t.serverId, lang: t.lang,
+        m3u8: anikageBuildProxyUrl(bestSource.url, "m3u8"),
+        tracks: (srcData.subtitles || []).map(function(sub) { return { file: anikageBuildProxyUrl(sub.file, "m3u8"), label: sub.label, kind: sub.kind, default: sub.default }; }),
+        intro: srcData.intro || { start: 0, end: 0 },
+        outro: srcData.outro || { start: 0, end: 0 },
+        quality: bestSource.quality, source: bestSource.type
+      };
+    }).catch(function() { return null; });
+  }));
+
+  for (var ti = 0; ti < taskResults.length; ti++) {
+    if (taskResults[ti].status !== "fulfilled" || !taskResults[ti].value) continue;
+    var r = taskResults[ti].value;
+    results[r.serverId][r.lang] = {
+      m3u8: r.m3u8, tracks: r.tracks,
+      intro: r.intro, outro: r.outro,
+      server: r.serverId, source: r.source, quality: r.quality
+    };
+  }
+
+  cacheScrape(cacheKey, results);
   return results;
 }
 
@@ -783,16 +795,21 @@ async function scrapeNekoStream(malId, episode) {
 }
 
 async function scrapeBoth(malId, episode) {
-  var errors = [];
-  try {
-    var mp = await scrapeMegaplay(malId, episode);
-    if (Object.keys(mp).length > 0) return mp;
-  } catch (e) { errors.push("MegaPlay: " + e.message); }
-  try {
-    var neko = await scrapeNekoStream(malId, episode);
-    if (Object.keys(neko).length > 0) return neko;
-  } catch (e) { errors.push("NekoStream: " + e.message); }
-  throw new Error("MAL " + malId + " ep " + episode + ": no sources. " + errors.join("; "));
+  var cacheKey = "mp-" + malId + "-" + episode;
+  var cached = getScrapeCache(cacheKey);
+  if (cached) return cached;
+
+  var results = await Promise.allSettled([scrapeMegaplay(malId, episode), scrapeNekoStream(malId, episode)]);
+  for (var i = 0; i < results.length; i++) {
+    if (results[i].status === "fulfilled") {
+      var data = results[i].value;
+      if (data && Object.keys(data).length > 0) {
+        cacheScrape(cacheKey, data);
+        return data;
+      }
+    }
+  }
+  throw new Error("MAL " + malId + " ep " + episode + ": no sources");
 }
 
 function parseDownloadHtml(html) {
@@ -890,6 +907,17 @@ async function getDownloadLinks(malId, episode) {
   return result;
 }
 
+async function getDownloadLinksCached(malId, episode) {
+  var cacheKey = "dl-" + malId + "-" + episode;
+  var cached = getScrapeCache(cacheKey);
+  if (cached) return cached;
+  try {
+    var data = await getDownloadLinks(malId, episode);
+    cacheScrape(cacheKey, data);
+    return data;
+  } catch (e) { return null; }
+}
+
 function rewriteM3u8(content, baseUrl, serverHost, hParam) {
   var baseDir = baseUrl.substring(0, baseUrl.lastIndexOf("/") + 1);
   hParam = hParam || "";
@@ -925,40 +953,57 @@ async function handleRequest(request) {
     if (embedMatch) {
       var anilistId = Number(embedMatch[1]);
       var episode = Number(embedMatch[2]);
-      var animeTitle = "", malId = null;
-      try {
-        var gql = JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english native} synonyms } }" });
-        var gr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: gql });
-        var gd = await gr.json();
-        var gm = gd.data && gd.data.Media;
-        if (gm) { malId = gm.idMal; animeTitle = gm.title && (gm.title.english || gm.title.romaji || gm.title.native) || ""; }
-      } catch {}
+
+      // Fetch AniList info and run anikage in PARALLEL (anikage doesn't need malId)
+      var aniInfoPromise = (function() {
+        var cacheKey = "al-" + anilistId;
+        var cached = getScrapeCache(cacheKey);
+        if (cached) return Promise.resolve(cached);
+        return fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english native} } }" }) }).then(function(r) { return r.json(); }).then(function(gd) { var gm = gd.data && gd.data.Media; if (gm) { var info = { malId: gm.idMal, title: gm.title && (gm.title.english || gm.title.romaji || gm.title.native) || "" }; cacheScrape(cacheKey, info); return info; } return { malId: null, title: "" }; }).catch(function() { return { malId: null, title: "" }; });
+      })();
+
+      // Run anikage scraper in parallel (doesn't need malId)
+      var akPromise = scrapeAnikage(anilistId, episode).catch(function() { return {}; });
+
+      // Run both + get AniList info
+      var bothResults = await Promise.all([aniInfoPromise, akPromise]);
+      var aniInfo = bothResults[0];
+      var akSources = bothResults[1];
+      var malId = aniInfo.malId;
+      var animeTitle = aniInfo.title;
+
+      // Fetch title fallback
       if (!animeTitle) {
         try {
           var ar = await fetch(ANIKAGE_API_BASE + "/" + anilistId, { headers: ANIKAGE_HEADERS });
           if (ar.ok) { var ad = await ar.json(); var t = ad.anime && ad.anime.title; animeTitle = (t && (t.english || t.romaji || t.userPreferred || t.native)) || ""; }
         } catch {}
       }
+
       var result = { success: true, anilistId: anilistId, malId: malId, ep: episode, title: animeTitle, sources: [], downloads: null };
-      if (malId) {
-        try {
-          var sources = await scrapeBoth(malId, episode);
-          var langKeys = ["sub", "dub"];
-          for (var li = 0; li < langKeys.length; li++) {
-            var lang = langKeys[li];
-            if (sources[lang]) {
-              var s = sources[lang];
-              var cfg = { source: "megaplay", type: lang, m3u8: null, tracks: null, intro: s.intro || null, outro: s.outro || null, label: animeTitle + " " + lang.toUpperCase() + " (MegaPlay)" };
-              var hash = storeConfig({ source: "megaplay", type: lang, m3u8: s.m3u8, tracks: s.tracks || [], intro: s.intro || null, outro: s.outro || null, title: animeTitle });
-              cfg.embedUrl = serverHost + "/api/watch-embed/" + hash;
-              result.sources.push(cfg);
-            }
+
+      // Run megaplay + downloads in parallel (need malId, but scrapeAnikage already done)
+      var mpPromise = malId ? scrapeBoth(malId, episode).catch(function() { return {}; }) : Promise.resolve({});
+      var dlPromise = malId ? getDownloadLinksCached(malId, episode) : Promise.resolve(null);
+
+      var mpDlResults = await Promise.all([mpPromise, dlPromise]);
+      var sources = mpDlResults[0];
+      result.downloads = mpDlResults[1];
+
+      // Process megaplay results
+      if (sources && typeof sources === "object") {
+        var langKeys = ["sub", "dub"];
+        for (var li = 0; li < langKeys.length; li++) {
+          var lang = langKeys[li];
+          if (sources[lang]) {
+            var s = sources[lang];
+            result.sources.push({ source: "megaplay", type: lang, m3u8: null, tracks: null, intro: s.intro || null, outro: s.outro || null, label: animeTitle + " " + lang.toUpperCase() + " (MegaPlay)", embedUrl: "" });
           }
-        } catch {}
-        try { result.downloads = await getDownloadLinks(malId, episode); } catch {}
+        }
       }
-      try {
-        var akSources = await scrapeAnikage(anilistId, episode);
+
+      // Process anikage results
+      if (akSources && typeof akSources === "object") {
         var serverNames = ["neko", "koto"];
         for (var si = 0; si < serverNames.length; si++) {
           var srv = akSources[serverNames[si]];
@@ -968,17 +1013,12 @@ async function handleRequest(request) {
             var lang2 = langKeys2[li2];
             if (srv[lang2]) {
               var s2 = srv[lang2];
-              var cfg2 = { source: "anikage", server: serverNames[si], type: lang2, quality: s2.quality, m3u8: null, tracks: null, intro: s2.intro || null, outro: s2.outro || null, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")" };
-              var rawM3u8 = s2.m3u8;
-              try { var pu = new URL(s2.m3u8); if (pu.hostname === "megacloud.animanga.fun") rawM3u8 = pu.searchParams.get("url") || s2.m3u8; } catch {}
-              var rawTracks = (s2.tracks || []).map(function(t) { try { var tu = new URL(t.file); if (tu.hostname === "megacloud.animanga.fun") return Object.assign({}, t, { file: tu.searchParams.get("url") || t.file }); } catch {} return t; });
-              var hash2 = storeConfig({ source: "anikage", type: lang2, server: serverNames[si], quality: s2.quality, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", m3u8: rawM3u8, tracks: rawTracks, intro: s2.intro || null, outro: s2.outro || null, title: animeTitle });
-              cfg2.embedUrl = serverHost + "/api/ak/embed/" + hash2;
-              result.sources.push(cfg2);
+              result.sources.push({ source: "anikage", server: serverNames[si], type: lang2, quality: s2.quality, m3u8: null, tracks: null, intro: s2.intro || null, outro: s2.outro || null, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", embedUrl: "" });
             }
           }
         }
-      } catch {}
+      }
+
       return new Response(JSON.stringify(result), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
@@ -1089,15 +1129,22 @@ async function handleRequest(request) {
       var wEpisode = Number(watchMegaMatch[2]);
       var wLang = watchMegaMatch[3];
       var wMalId = null, wTitle = "";
-      try {
-        var wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
-        var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql });
-        var wGd = await wGr.json();
-        var wGm = wGd.data && wGd.data.Media;
-        if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; }
-      } catch {}
+      // Check AniList cache
+      var wInfoCached = getScrapeCache("al-" + wAnilistId);
+      if (wInfoCached) { wMalId = wInfoCached.malId; wTitle = wInfoCached.title; }
+      if (!wMalId) {
+        try {
+          var wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
+          var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql });
+          var wGd = await wGr.json();
+          var wGm = wGd.data && wGd.data.Media;
+          if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + wAnilistId, { malId: wMalId, title: wTitle }); }
+        } catch {}
+      }
       if (!wMalId) return new Response("MAL ID not found for anilist " + wAnilistId, { status: 404, headers: corsHeaders });
-      var wSources = await scrapeBoth(wMalId, wEpisode);
+      // Use cache if available (anime-embed likely already scraped)
+      var wCacheKey = "mp-" + wMalId + "-" + wEpisode;
+      var wSources = getScrapeCache(wCacheKey) || await scrapeBoth(wMalId, wEpisode);
       var wData = wSources[wLang];
       if (!wData) return new Response(wLang.toUpperCase() + " not available for ep " + wEpisode, { status: 404, headers: corsHeaders });
       var wCfg = { m3u8: wData.m3u8, tracks: wData.tracks || [], intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode };
@@ -1113,14 +1160,20 @@ async function handleRequest(request) {
       var wEpisode2 = Number(watchAkMatch[2]);
       var wLang2 = watchAkMatch[3];
       var wTitle2 = "";
-      try {
-        var wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ title{romaji english} } }" });
-        var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql2 });
-        var wGd2 = await wGr2.json();
-        var wGm2 = wGd2.data && wGd2.data.Media;
-        if (wGm2) wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || "";
-      } catch {}
-      var wAkSources = await scrapeAnikage(wAnilistId2, wEpisode2);
+      var wInfoCached2 = getScrapeCache("al-" + wAnilistId2);
+      if (wInfoCached2) { wTitle2 = wInfoCached2.title; }
+      if (!wTitle2) {
+        try {
+          var wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ title{romaji english} } }" });
+          var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql2 });
+          var wGd2 = await wGr2.json();
+          var wGm2 = wGd2.data && wGd2.data.Media;
+          if (wGm2) { wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || ""; cacheScrape("al-" + wAnilistId2, { malId: null, title: wTitle2 }); }
+        } catch {}
+      }
+      // Use cache if available (anime-embed likely already scraped)
+      var wAkCacheKey = "ak-" + wAnilistId2 + "-" + wEpisode2;
+      var wAkSources = getScrapeCache(wAkCacheKey) || await scrapeAnikage(wAnilistId2, wEpisode2);
       var wAkData = null, wServerName = "";
       var targetServers = ["neko", "koto"];
       for (var si = 0; si < targetServers.length; si++) {
