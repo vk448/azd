@@ -273,6 +273,72 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // GET /api/watch/megaplay/:anilistId/:episode/:lang
+    const watchMegaMatch = url.match(/^\/api\/watch\/megaplay\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchMegaMatch) {
+      const wAnilistId = Number(watchMegaMatch[1]);
+      const wEpisode = Number(watchMegaMatch[2]);
+      const wLang = watchMegaMatch[3];
+      let wMalId = null, wTitle = "";
+      try {
+        const wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
+        const wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql });
+        const wGd = await wGr.json();
+        const wGm = wGd.data && wGd.data.Media;
+        if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; }
+      } catch {}
+      if (!wMalId) { res.writeHead(404); return res.end("MAL ID not found"); }
+      const wSources = await scrapeBoth(wMalId, wEpisode);
+      const wData = wSources[wLang];
+      if (!wData) { res.writeHead(404); return res.end(wLang.toUpperCase() + " not available"); }
+      const host = req.headers.host || "localhost";
+      const proto = req.headers["x-forwarded-proto"] || "http";
+      const sHost = `${proto}://${host}`;
+      const wCfg = {
+        m3u8: `${sHost}/api/proxy/m3u8?url=${encodeURIComponent(wData.m3u8)}&headers=${encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }))}`,
+        tracks: (wData.tracks || []).map(t => ({ ...t, file: `${sHost}/api/proxy/m3u8?url=${encodeURIComponent(t.file)}&headers=${encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }))}` })),
+        intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode
+      };
+      const wPage = PLAYER_HTML.replace("</head>", `<script>window.__PLAYER_CONFIG__=${JSON.stringify(wCfg)};</script></head>`);
+      return html(res, wPage);
+    }
+
+    // GET /api/watch/ak/:anilistId/:episode/:lang
+    const watchAkMatch = url.match(/^\/api\/watch\/ak\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchAkMatch) {
+      const wAnilistId2 = Number(watchAkMatch[1]);
+      const wEpisode2 = Number(watchAkMatch[2]);
+      const wLang2 = watchAkMatch[3];
+      let wTitle2 = "";
+      try {
+        const wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ title{romaji english} } }" });
+        const wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql2 });
+        const wGd2 = await wGr2.json();
+        const wGm2 = wGd2.data && wGd2.data.Media;
+        if (wGm2) wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || "";
+      } catch {}
+      const wAkSources = await scrapeAnikage(wAnilistId2, wEpisode2);
+      let wAkData = null;
+      const targetServers = ["neko", "koto"];
+      for (const srvName of targetServers) {
+        const srv = wAkSources[srvName];
+        if (srv && srv[wLang2]) { wAkData = srv[wLang2]; break; }
+      }
+      if (!wAkData) { res.writeHead(404); return res.end(wLang2.toUpperCase() + " not available"); }
+      const host2 = req.headers.host || "localhost";
+      const proto2 = req.headers["x-forwarded-proto"] || "http";
+      const sHost2 = `${proto2}://${host2}`;
+      const ANI_H = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*" }));
+      const wrapAni = (u) => `https://megacloud.animanga.fun/proxy?url=${encodeURIComponent(u)}&headers=${ANI_H}`;
+      const wCfg2 = {
+        m3u8: `${sHost2}/api/proxy/m3u8?url=${encodeURIComponent(wrapAni(wAkData.m3u8))}`,
+        tracks: (wAkData.tracks || []).map(t => ({ ...t, file: `${sHost2}/api/proxy/m3u8?url=${encodeURIComponent(wrapAni(t.file))}` })),
+        intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2
+      };
+      const wPage2 = PLAYER_HTML.replace("</head>", `<script>window.__PLAYER_CONFIG__=${JSON.stringify(wCfg2)};</script></head>`);
+      return html(res, wPage2);
+    }
+
     // GET /api/health
     if (url === "/api/health") {
       return json(res, { ok: true, time: Date.now() });

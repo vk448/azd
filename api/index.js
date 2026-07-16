@@ -1083,6 +1083,58 @@ async function handleRequest(request) {
       }
     }
 
+    var watchMegaMatch = url.match(/^\/api\/watch\/megaplay\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchMegaMatch) {
+      var wAnilistId = Number(watchMegaMatch[1]);
+      var wEpisode = Number(watchMegaMatch[2]);
+      var wLang = watchMegaMatch[3];
+      var wMalId = null, wTitle = "";
+      try {
+        var wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
+        var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql });
+        var wGd = await wGr.json();
+        var wGm = wGd.data && wGd.data.Media;
+        if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; }
+      } catch {}
+      if (!wMalId) return new Response("MAL ID not found for anilist " + wAnilistId, { status: 404, headers: corsHeaders });
+      var wSources = await scrapeBoth(wMalId, wEpisode);
+      var wData = wSources[wLang];
+      if (!wData) return new Response(wLang.toUpperCase() + " not available for ep " + wEpisode, { status: 404, headers: corsHeaders });
+      var wCfg = { m3u8: wData.m3u8, tracks: wData.tracks || [], intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode };
+      wCfg.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wCfg.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
+      if (wCfg.tracks) { wCfg.tracks = wCfg.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" })) }); }); }
+      var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
+      return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+    }
+
+    var watchAkMatch = url.match(/^\/api\/watch\/ak\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchAkMatch) {
+      var wAnilistId2 = Number(watchAkMatch[1]);
+      var wEpisode2 = Number(watchAkMatch[2]);
+      var wLang2 = watchAkMatch[3];
+      var wTitle2 = "";
+      try {
+        var wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ title{romaji english} } }" });
+        var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" }, body: wGql2 });
+        var wGd2 = await wGr2.json();
+        var wGm2 = wGd2.data && wGd2.data.Media;
+        if (wGm2) wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || "";
+      } catch {}
+      var wAkSources = await scrapeAnikage(wAnilistId2, wEpisode2);
+      var wAkData = null, wServerName = "";
+      var targetServers = ["neko", "koto"];
+      for (var si = 0; si < targetServers.length; si++) {
+        var srv = wAkSources[targetServers[si]];
+        if (srv && srv[wLang2]) { wAkData = srv[wLang2]; wServerName = targetServers[si]; break; }
+      }
+      if (!wAkData) return new Response(wLang2.toUpperCase() + " not available for ep " + wEpisode2, { status: 404, headers: corsHeaders });
+      var ANI_HEADERS_ENC = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
+      function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS_ENC; }
+      var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(wAkData.m3u8)), tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2 };
+      var wPage2 = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg2) + ";</script></head>");
+      return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+    }
+
     return new Response("Not found", { status: 404, headers: corsHeaders });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, error: e.message, stack: e.stack }), { status: 500, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
