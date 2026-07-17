@@ -265,7 +265,8 @@ async function scrapeAnikage(slugOrId, episode) {
         tracks: (srcData.subtitles || []).map(function(sub) { return { file: anikageBuildProxyUrl(sub.file, "m3u8"), label: sub.label, kind: sub.kind, default: sub.default }; }),
         intro: srcData.intro || { start: 0, end: 0 },
         outro: srcData.outro || { start: 0, end: 0 },
-        quality: bestSource.quality, source: bestSource.type
+        quality: bestSource.quality, source: bestSource.type,
+        allSources: (srcData.sources || []).map(function(s) { return { url: anikageBuildProxyUrl(s.url, "m3u8"), quality: s.quality, type: s.type, embedUrl: s.embedUrl }; })
       };
     }).catch(function() { return null; });
   }));
@@ -276,7 +277,8 @@ async function scrapeAnikage(slugOrId, episode) {
     results[r.serverId][r.lang] = {
       m3u8: r.m3u8, tracks: r.tracks,
       intro: r.intro, outro: r.outro,
-      server: r.serverId, source: r.source, quality: r.quality
+      server: r.serverId, source: r.source, quality: r.quality,
+      allSources: r.allSources || []
     };
   }
 
@@ -498,16 +500,71 @@ async function getFrom9Anime(malId, episode) {
   return parseDownloadHtml(d.data.result);
 }
 
-async function getFromGogoanime(malId, episode) {
-  var r = await fetch("https://9anime.org.lv/wp-admin/admin-ajax.php", {
-    method: "POST",
-    headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest" },
-    body: "action=fetch_download_links&mal_id=" + malId + "&ep=" + episode
-  });
-  if (!r.ok) throw new Error("gogo " + r.status);
-  var d = await r.json();
-  if (!d.success || !d.data || d.data.status !== 200 || !d.data.result) throw new Error("No links");
-  return parseDownloadHtml(d.data.result);
+async function getFromNekoStreamDL(malId, episode) {
+  var ts = Math.floor(Date.now() / 1000);
+  var r = await fetch("https://mapper.nekostream.site/api/mal/" + malId + "/" + episode + "/" + ts, { headers: { "User-Agent": UA } });
+  if (!r.ok) throw new Error("Mapper " + r.status);
+  var servers = await r.json();
+  if (servers.error) throw new Error(servers.message || servers.error);
+  var result = { sub: [], dub: [] };
+  var entries = Object.entries(servers);
+  for (var i = 0; i < entries.length; i++) {
+    var name = entries[i][0];
+    var data = entries[i][1];
+    if (name === "status") continue;
+    var langs = ["sub", "dub"];
+    for (var j = 0; j < langs.length; j++) {
+      var lang = langs[j];
+      if (data[lang] && data[lang].download) {
+        var dlEntries = Object.entries(data[lang].download);
+        for (var k = 0; k < dlEntries.length; k++) {
+          var server = dlEntries[k][0];
+          var dlUrl = dlEntries[k][1];
+          var code = extractCodeFromUrl(dlUrl);
+          if (code) result[lang].push({ url: dlUrl, quality: "Default", best: false, source: server, code: code });
+        }
+      }
+    }
+  }
+  return result;
+}
+
+async function getDownloadLinks(malId, episode) {
+  var errors = [];
+  var result = { sub: [], dub: [] };
+
+  // Try 9anime
+  try {
+    var a9 = await getFrom9Anime(malId, episode);
+    var langs = ["sub", "dub"];
+    for (var i = 0; i < langs.length; i++) {
+      var lang = langs[i];
+      for (var j = 0; j < a9[lang].length; j++) {
+        var link = a9[lang][j];
+        var code = link.url.split("/").pop();
+        result[lang].push(Object.assign({}, link, { code: code, source: "9anime", workerUrls: buildWorkerUrl(code) }));
+      }
+    }
+  } catch (e) { errors.push("9anime: " + e.message); }
+
+  // Try NekoStream
+  try {
+    var neko = await getFromNekoStreamDL(malId, episode);
+    var langs2 = ["sub", "dub"];
+    for (var i2 = 0; i2 < langs2.length; i2++) {
+      var lang2 = langs2[i2];
+      for (var j2 = 0; j2 < neko[lang2].length; j2++) {
+        var link2 = neko[lang2][j2];
+        var exists = result[lang2].some(function(x) { return x.code === link2.code; });
+        if (!exists) result[lang2].push(Object.assign({}, link2, { source: "nekostream", workerUrls: buildWorkerUrl(link2.code) }));
+      }
+    }
+  } catch (e) { errors.push("NekoStream: " + e.message); }
+
+  if (result.sub.length === 0 && result.dub.length === 0) {
+    throw new Error("No download links for MAL " + malId + " ep " + episode + ". " + errors.join("; "));
+  }
+  return result;
 }
 
 async function getDownloadLinksCached(malId, ep) {
@@ -515,10 +572,10 @@ async function getDownloadLinksCached(malId, ep) {
   var cached = getScrapeCache(key);
   if (cached) return cached;
   try {
-    var from9 = await getFrom9Anime(malId, ep);
-    if (from9 && (from9.sub.length > 0 || from9.dub.length > 0)) { cacheScrape(key, from9); return from9; }
-  } catch (e) {}
-  return null;
+    var data = await getDownloadLinks(malId, ep);
+    cacheScrape(key, data);
+    return data;
+  } catch (e) { return null; }
 }
 
 const PLAYER_HTML = `<!DOCTYPE html>
@@ -526,8 +583,8 @@ const PLAYER_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>紅蓮 Player</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+<title>Player</title>
+<script src="/api/hls.js"></script>
 <style>
   * { box-sizing: border-box; }
   html,body{
@@ -608,6 +665,10 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .center-play svg{ width:30px; height:30px; fill:#fff; margin-left:4px; }
   .center-play.hidden{ opacity:0; pointer-events:none; }
 
+  .skip-btn{position:absolute;top:18px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
+  .skip-btn:hover{background:rgba(255,30,60,0.45);box-shadow:0 0 16px var(--red-glow-soft)}
+  .skip-btn.show{display:block}
+
   .loading{
     position:absolute; top:50%; left:50%;
     transform: translate(-50%,-50%);
@@ -660,6 +721,9 @@ const PLAYER_HTML = `<!DOCTYPE html>
     opacity:1;
     transform: translateY(0);
   }
+
+  .video-area.hide-cursor{cursor:none}
+  .video-area.hide-cursor .controls,.video-area.hide-cursor .brand-mini,.video-area.hide-cursor .skip-btn{opacity:0;pointer-events:none}
 
   .seek-row{
     display:flex; align-items:center; gap:10px;
@@ -763,8 +827,11 @@ const PLAYER_HTML = `<!DOCTYPE html>
     transform: translateY(0);
     pointer-events: auto;
   }
-  .menu-panel{ display:none; }
-  .menu-panel.active{ display:block; }
+  .menu-panel{display:none;max-height:260px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--red-dim) transparent}
+  .menu-panel::-webkit-scrollbar{width:4px}
+  .menu-panel::-webkit-scrollbar-thumb{background:var(--red-dim);border-radius:2px}
+  .menu-panel::-webkit-scrollbar-track{background:transparent}
+  .menu-panel.active{display:block}
 
   .menu-item{
     display:flex; align-items:center; justify-content:space-between;
@@ -842,12 +909,14 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
     <div class="brand-mini">
       <div class="mark"></div>
-      <span id="animeTitle">紅蓮 Player</span>
+      <span id="animeName">Player</span>
     </div>
 
     <div class="center-play" id="centerPlay">
       <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
     </div>
+
+    <div class="skip-btn" id="skipBtn">Skip</div>
 
     <div class="controls" id="controls">
       <div class="seek-row">
@@ -976,8 +1045,9 @@ const PLAYER_HTML = `<!DOCTYPE html>
   const skipFwd = document.getElementById('skipFwd');
   const loading = document.getElementById('loading');
   const statusTag = document.getElementById('statusTag');
+  const skipBtn = document.getElementById('skipBtn');
 
-  if(cfg.title){document.getElementById("animeTitle").textContent=cfg.title;document.title=cfg.title}
+  if(cfg.title){document.getElementById("animeName").textContent=cfg.title;document.title=cfg.title+" - Player"}
 
   const PLAY_SVG='<path d="M8 5v14l11-7z"/>';
   const PAUSE_SVG='<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
@@ -1083,6 +1153,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
     seek.value=pct;
     seek.style.background='linear-gradient(to right, var(--red) '+pct+'%, rgba(255,255,255,0.12) '+pct+'%)';
     curTime.textContent=fmt(video.currentTime);
+    checkSkip();
   });
   video.addEventListener('loadedmetadata',function(){
     durTime.textContent=fmt(video.duration);
@@ -1091,6 +1162,18 @@ const PLAYER_HTML = `<!DOCTYPE html>
     if(isFinite(video.duration)){
       video.currentTime=(seek.value/100)*video.duration;
     }
+  });
+
+  function checkSkip(){
+    var t=video.currentTime;
+    if(cfg.intro&&cfg.intro.start!==cfg.intro.end&&t>=cfg.intro.start&&t<cfg.intro.end){skipBtn.textContent="Skip Intro";skipBtn.classList.add("show");return}
+    if(cfg.outro&&cfg.outro.start!==cfg.outro.end&&t>=cfg.outro.start&&t<cfg.outro.end){skipBtn.textContent="Skip Outro";skipBtn.classList.add("show");return}
+    skipBtn.classList.remove("show");
+  }
+  skipBtn.addEventListener("click",function(){
+    var t=video.currentTime;
+    if(cfg.intro&&t>=cfg.intro.start&&t<cfg.intro.end)video.currentTime=cfg.intro.end;
+    else if(cfg.outro&&t>=cfg.outro.start&&t<cfg.outro.end)video.currentTime=cfg.outro.end;
   });
 
   skipBack.addEventListener('click',function(){video.currentTime=Math.max(0,video.currentTime-10)});
@@ -1121,6 +1204,20 @@ const PLAYER_HTML = `<!DOCTYPE html>
     else{document.exitFullscreen()}
   });
 
+  document.addEventListener("fullscreenchange", function() {
+    if (document.fullscreenElement === videoArea) {
+      if (screen.orientation && typeof screen.orientation.lock === "function") {
+        screen.orientation.lock("landscape").catch(function(err) {
+          console.log("Orientation lock error:", err);
+        });
+      }
+    } else {
+      if (screen.orientation && typeof screen.orientation.unlock === "function") {
+        try { screen.orientation.unlock(); } catch(e) {}
+      }
+    }
+  });
+
   document.addEventListener('keydown',function(e){
     if(e.code==='Space'){e.preventDefault();togglePlay()}
     if(e.code==='ArrowRight'){video.currentTime+=5}
@@ -1134,7 +1231,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   if(src&&src.length>0){
     if(src.includes('.m3u8')){
       if(Hls.isSupported()){
-        hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60});
+        hls=new Hls({startLevel:-1,capLevelToPlayerSize:true,maxBufferLength:30,maxMaxBufferLength:60,startFragPrefetch:true});
         hls.loadSource(src);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED,function(){
@@ -1151,7 +1248,8 @@ const PLAYER_HTML = `<!DOCTYPE html>
             });
           }
         });
-        hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){setTag('Stream error')}})
+        hls.on(Hls.Events.LEVEL_SWITCHED,function(){});
+        hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal){if(d.type===Hls.ErrorTypes.NETWORK_ERROR){setTag("reconnecting...");hls.startLoad()}else if(d.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError()}}})
       }else if(video.canPlayType('application/vnd.apple.mpegurl')){
         video.src=src;initSubs()
       }else{
