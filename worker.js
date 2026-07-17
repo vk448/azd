@@ -205,9 +205,7 @@ const ANIKAGE_HEADERS = {
 function anikageBuildProxyUrl(token, type) {
   if (!token) return "";
   if (token.startsWith("http://") || token.startsWith("https://")) return token;
-  var rawUrl = ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token;
-  var hdrs = JSON.stringify({ "User-Agent": UA, "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*" });
-  return ANIKAGE_MEGACLOUD_PROXY + "?url=" + encodeURIComponent(rawUrl) + "&headers=" + encodeURIComponent(hdrs);
+  return ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token;
 }
 
 async function anikageGetServers(slug, episode) {
