@@ -1447,9 +1447,7 @@ async function handleRequest(request) {
         var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
         var wData = wSources[serverName] && wSources[serverName][lang];
         if (!wData) return new Response(lang.toUpperCase() + " not available on " + serverName + " for ep " + ep, { status: 404, headers: corsHeaders });
-        var ANI_HEADERS_ENC = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
-        function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS_ENC; }
-        var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(wData.m3u8)), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep };
+        var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep };
         var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
         return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
       };
@@ -1487,9 +1485,7 @@ async function handleRequest(request) {
         if (srv && srv[wLang2]) { wAkData = srv[wLang2]; wServerName = targetServers[si]; break; }
       }
       if (!wAkData) return new Response(wLang2.toUpperCase() + " not available for ep " + wEpisode2, { status: 404, headers: corsHeaders });
-      var ANI_HEADERS_ENC = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
-      function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS_ENC; }
-      var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(wAkData.m3u8)), tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2 };
+      var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wAkData.m3u8), tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2 };
       var wPage2 = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg2) + ";</script></head>");
       return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
