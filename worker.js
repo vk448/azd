@@ -1800,6 +1800,17 @@ async function handleRequest(request) {
           wData = wSources2[serverName] && wSources2[serverName][lang];
         }
 
+        if (!wData && (serverName === "neko" || serverName === "koto")) {
+          var fallbackServer = serverName === "neko" ? "koto" : "neko";
+          wData = await scrapeVaromine(aniId, ep, lang, fallbackServer);
+          if (!wData) {
+            var wFallbackCacheKey = "ak-" + aniId + "-" + ep;
+            var wFallbackSources = getScrapeCache(wFallbackCacheKey) || await scrapeAnikage(aniId, ep);
+            wData = wFallbackSources[fallbackServer] && wFallbackSources[fallbackServer][lang];
+          }
+          if (wData) serverName = fallbackServer;
+        }
+
         if (!wData) return new Response(lang.toUpperCase() + " not available on " + serverName + " for ep " + ep, { status: 404, headers: corsHeaders });
         var streamReferer = "https://vivibebe.site/";
         if (wData.embedUrl && wData.embedUrl.includes("bibiemb")) streamReferer = "https://bibiemb.xyz/";
