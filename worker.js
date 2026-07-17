@@ -1411,7 +1411,7 @@ async function handleRequest(request) {
       var wAnilistId = Number(watchMegaMatch[1]);
       var wEpisode = Number(watchMegaMatch[2]);
       var wLang = watchMegaMatch[3];
-      var wMalId = null, wTitle = "";
+      var wMalId = null, wTitle = "", wGqlResult = "no-attempt";
       // Check AniList cache
       var wInfoCached = getScrapeCache("al-" + wAnilistId);
       if (wInfoCached) { wMalId = wInfoCached.malId; wTitle = wInfoCached.title; }
@@ -1420,11 +1420,12 @@ async function handleRequest(request) {
           var wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
           var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
           var wGd = await wGr.json();
+          wGqlResult = JSON.stringify(wGd);
           var wGm = wGd.data && wGd.data.Media;
           if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + wAnilistId, { malId: wMalId, title: wTitle }); }
-        } catch {}
+        } catch (e) { return new Response("GraphQL error: " + e.message, { status: 500, headers: corsHeaders }); }
       }
-      if (!wMalId) return new Response("MAL ID not found for anilist " + wAnilistId + " (cache=" + JSON.stringify(wInfoCached) + ")", { status: 404, headers: corsHeaders });
+      if (!wMalId) return new Response("MAL ID not found for anilist " + wAnilistId + " (gql=" + wGqlResult + ")", { status: 404, headers: corsHeaders });
       // Use cache if available (anime-embed likely already scraped)
       var wCacheKey = "mp-" + wMalId + "-" + wEpisode;
       var wSources = getScrapeCache(wCacheKey) || await scrapeBoth(wMalId, wEpisode);
