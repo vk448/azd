@@ -479,6 +479,7 @@ const DOWNLOAD_PAGE_HTML = `<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://pl30409402.effectivecpmnetwork.com/ff/24/51/ff2451a425f7fe2bb139ca10edc1e103.js"></script>
 <style>
 :root{--bg:#0a0a0f;--bg-2:#111116;--card:#151519;--line:rgba(255,255,255,0.08);--line-strong:rgba(255,255,255,0.14);--text:#f2f1ea;--text-dim:#8d8b96;--sun:#ffc93c;--ember:#ff4d2e;--ember-deep:#c81e3a}
 *{box-sizing:border-box}
@@ -498,6 +499,7 @@ main{max-width:1100px;margin:0 auto;padding:60px 24px 100px;position:relative;z-
 .poster .badge{position:absolute;top:14px;left:14px;font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:1.5px;background:rgba(10,10,15,0.75);backdrop-filter:blur(6px);border:1px solid var(--line-strong);padding:6px 12px;border-radius:8px;color:var(--sun)}
 .title-block{padding-top:6px}
 h1{font-family:'Bebas Neue',sans-serif;font-size:58px;line-height:0.95;letter-spacing:1px;margin:0 0 8px;background:linear-gradient(180deg,#fff,#d9d7cf 60%,var(--sun));-webkit-background-clip:text;background-clip:text;color:transparent}
+.subtitle{color:var(--text-dim);font-size:15px;margin:0 0 24px;max-width:480px;line-height:1.6}
 .meta-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:28px}
 .pill{font-size:13px;font-weight:500;padding:8px 16px;border-radius:100px;border:1px solid var(--line);background:var(--card);color:var(--text-dim);display:flex;align-items:center;gap:6px}
 .pill.hot{border-color:rgba(255,77,46,0.4);color:#ffd3c2;background:rgba(255,77,46,0.08)}
@@ -528,8 +530,13 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:58px;line-height:0.95;letter-sp
 .dl-link svg{color:var(--ember);flex-shrink:0}
 .dl-link:hover svg{color:var(--sun)}
 .no-links{background:rgba(255,255,255,0.03);border:1px solid var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--text-dim);font-size:14px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:36px}
+.stat{border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:rgba(255,255,255,0.02)}
+.stat .val{font-family:'Bebas Neue',sans-serif;font-size:26px;color:var(--sun);letter-spacing:1px}
+.stat .lbl{font-size:12px;color:var(--text-dim);margin-top:2px}
 footer{text-align:center;color:var(--text-dim);font-size:12px;padding:20px 24px 40px;position:relative;z-index:2}
-@media(max-width:820px){.layout{grid-template-columns:1fr}.poster-wrap{max-width:260px;margin:0 auto}h1{font-size:42px;text-align:center}.subtitle{margin:0 auto 24px;text-align:center}.meta-row,.actions{justify-content:center}.title-block{text-align:center}.ep-panel-top{flex-direction:column;align-items:center;gap:6px;text-align:center}.ep-scroll{justify-content:center}.dl-section-title{justify-content:center}.dl-links{align-items:center}.dl-link{max-width:360px;width:100%}}
+@media(max-width:820px){.layout{grid-template-columns:1fr}.poster-wrap{max-width:260px;margin:0 auto}h1{font-size:42px;text-align:center}.subtitle{margin:0 auto 24px;text-align:center}.meta-row,.actions{justify-content:center}.title-block{text-align:center}.ep-panel-top{flex-direction:column;align-items:center;gap:6px;text-align:center}.ep-scroll{justify-content:center}.dl-section-title{justify-content:center}.dl-links{align-items:center}.dl-link{max-width:360px;width:100%}.stats{grid-template-columns:repeat(3,1fr);max-width:400px;margin:36px auto 0}}
+@media(max-width:420px){nav{padding:20px 16px 0}.brand{font-size:22px;letter-spacing:2px}main{padding:36px 16px 60px}.eyebrow{font-size:10px;padding:5px 12px}.poster-wrap{max-width:200px}h1{font-size:32px}.subtitle{font-size:13.5px;max-width:100%}.pill{font-size:12px;padding:6px 12px}.ep-panel{padding:16px 14px}.ep-current{font-size:18px}.ep-chip{width:36px;height:36px;font-size:12px}.actions{flex-direction:column;width:100%}.btn{width:100%;justify-content:center;padding:14px 20px;font-size:13.5px}.stats{grid-template-columns:1fr;max-width:280px;margin:24px auto 0}.stat{padding:12px 14px}.stat .val{font-size:22px}.dl-link{padding:12px 14px}}
 @media(prefers-reduced-motion:no-preference){.poster-wrap{animation:float 5s ease-in-out infinite}}
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 :focus-visible{outline:2px solid var(--sun);outline-offset:2px}
@@ -545,12 +552,13 @@ footer{text-align:center;color:var(--text-dim);font-size:12px;padding:20px 24px 
   <div class="layout">
     <div class="poster-wrap">
       <div class="poster">
-        <span class="badge">HD · 1080p</span>
+        <span class="badge">HD \u00b7 1080p</span>
         <img src="{{COVER}}" alt="{{TITLE}}" />
       </div>
     </div>
     <div class="title-block">
       <h1>{{TITLE}}</h1>
+      <p class="subtitle">{{DESCRIPTION}}</p>
       <div class="meta-row">
         {{RATING_PILL}}
         {{GENRES_PILLS}}
@@ -566,10 +574,16 @@ footer{text-align:center;color:var(--text-dim);font-size:12px;padding:20px 24px 
       <div class="actions" style="margin-top:24px">
         <a class="btn btn-primary" href="{{WATCH_URL}}" target="_blank"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Watch Now</a>
       </div>
+      <div class="stats">
+        <div class="stat"><div class="val">{{RATING}}</div><div class="lbl">Rating</div></div>
+        <div class="stat"><div class="val">{{TOTAL_EPS}}</div><div class="lbl">Episodes</div></div>
+        <div class="stat"><div class="val">{{FORMAT}}</div><div class="lbl">Format</div></div>
+      </div>
     </div>
   </div>
 </main>
-<footer>animezilla — download</footer>
+<footer>animezilla \u2014 download</footer>
+<script src="https://pl30409403.effectivecpmnetwork.com/7e/85/e9/7e85e9739d433e1f5510e0b86fb49aa3.js"></script>
 </body>
 </html>`;
 
@@ -737,12 +751,15 @@ async function getFromNekoStreamDL(malId, episode) {
 }
 
 async function getDownloadLinks(malId, episode) {
-  var errors = [];
   var result = { sub: [], dub: [] };
 
-  // Try 9anime
-  try {
-    var a9 = await getFrom9Anime(malId, episode);
+  var [a9Result, nekoResult] = await Promise.allSettled([
+    getFrom9Anime(malId, episode),
+    getFromNekoStreamDL(malId, episode)
+  ]);
+
+  if (a9Result.status === "fulfilled" && a9Result.value) {
+    var a9 = a9Result.value;
     var langs = ["sub", "dub"];
     for (var i = 0; i < langs.length; i++) {
       var lang = langs[i];
@@ -752,11 +769,10 @@ async function getDownloadLinks(malId, episode) {
         result[lang].push(Object.assign({}, link, { code: code, source: "9anime", workerUrls: buildWorkerUrl(code) }));
       }
     }
-  } catch (e) { errors.push("9anime: " + e.message); }
+  }
 
-  // Try NekoStream
-  try {
-    var neko = await getFromNekoStreamDL(malId, episode);
+  if (nekoResult.status === "fulfilled" && nekoResult.value) {
+    var neko = nekoResult.value;
     var langs2 = ["sub", "dub"];
     for (var i2 = 0; i2 < langs2.length; i2++) {
       var lang2 = langs2[i2];
@@ -766,10 +782,10 @@ async function getDownloadLinks(malId, episode) {
         if (!exists) result[lang2].push(Object.assign({}, link2, { source: "nekostream", workerUrls: buildWorkerUrl(link2.code) }));
       }
     }
-  } catch (e) { errors.push("NekoStream: " + e.message); }
+  }
 
   if (result.sub.length === 0 && result.dub.length === 0) {
-    throw new Error("No download links for MAL " + malId + " ep " + episode + ". " + errors.join("; "));
+    throw new Error("No download links for MAL " + malId + " ep " + episode);
   }
   return result;
 }
@@ -1828,27 +1844,28 @@ async function handleRequest(request) {
       var dlAnilistId = Number(dlMatch[1]);
       var dlEpisode = Number(dlMatch[2]);
 
-      var dlAnilistInfo = await fetchAnilistInfo(dlAnilistId);
-      var dlTitle = dlAnilistInfo.title || "Unknown";
-      var dlCover = dlAnilistInfo.coverImage || "";
-      var dlMalId = dlAnilistInfo.malId || null;
-
+      var dlAnilistPromise = fetchAnilistInfo(dlAnilistId);
       var dlInfoPromise = fetch(VAROMINE_API + "/api/info?slug=" + dlAnilistId).then(function(r) { return r.json(); }).catch(function() { return null; });
       var dlEpsPromise = fetch(VAROMINE_API + "/api/episodes?slug=" + dlAnilistId).then(function(r) { return r.json(); }).catch(function() { return null; });
-      var dlDlPromise = dlMalId ? getDownloadLinksCached(dlMalId, dlEpisode) : Promise.resolve(null);
 
-      var [dlInfoRes, dlEpsRes, dlDlData] = await Promise.all([dlInfoPromise, dlEpsPromise, dlDlPromise]);
+      var [dlAnilistInfo, dlInfoRes, dlEpsRes] = await Promise.all([dlAnilistPromise, dlInfoPromise, dlEpsPromise]);
+
+      var dlTitle = dlAnilistInfo.title || "";
+      var dlCover = "";
+      var dlMalId = dlAnilistInfo.malId || null;
 
       var dlInfo = dlInfoRes && dlInfoRes.data ? dlInfoRes.data : {};
+      if (!dlTitle && dlInfo.title) dlTitle = dlInfo.title.english || dlInfo.title.romaji || dlInfo.title.userPreferred || "";
+      if (dlInfo.coverImage) dlCover = dlInfo.coverImage.extraLarge || dlInfo.coverImage.large || dlInfo.coverImage.medium || "";
+
+      var dlDlData = dlMalId ? await getDownloadLinksCached(dlMalId, dlEpisode) : null;
+
       var dlEpList = dlEpsRes && dlEpsRes.data ? (Array.isArray(dlEpsRes.data) ? dlEpsRes.data : []) : [];
       var dlTotalEps = dlInfo.totalEpisodes || dlEpList.length || 24;
       var dlGenres = dlInfo.genres || [];
       var dlRating = dlInfo.rating || "";
       var dlSubLinks = dlDlData && dlDlData.sub ? dlDlData.sub : [];
       var dlDubLinks = dlDlData && dlDlData.dub ? dlDlData.dub : [];
-
-      if (!dlCover && dlInfo.coverImage) dlCover = dlInfo.coverImage.extraLarge || dlInfo.coverImage.large || dlInfo.coverImage.medium || "";
-      if (!dlTitle && dlInfo.title) dlTitle = dlInfo.title.english || dlInfo.title.romaji || dlInfo.title.userPreferred || "";
 
       var dlCurrentEp = dlInfo.currentEpisode || dlEpList.length || dlEpisode;
       var dlAiredEps = Math.max(dlCurrentEp, dlEpisode);
@@ -1893,7 +1910,10 @@ async function handleRequest(request) {
         .replace(/\{\{RATING_PILL\}\}/g, ratingPill)
         .replace(/\{\{GENRES_PILLS\}\}/g, genresPills)
         .replace(/\{\{DOWNLOAD_LINKS\}\}/g, downloadLinksHtml)
-        .replace(/\{\{WATCH_URL\}\}/g, watchUrl);
+        .replace(/\{\{WATCH_URL\}\}/g, watchUrl)
+        .replace(/\{\{DESCRIPTION\}\}/g, dlInfo.description || "")
+        .replace(/\{\{RATING\}\}/g, dlRating ? (typeof dlRating === "number" ? dlRating.toFixed(1) : dlRating) : "N/A")
+        .replace(/\{\{FORMAT\}\}/g, dlInfo.format || "TV");
 
       return new Response(dlPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
