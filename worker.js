@@ -1197,9 +1197,13 @@ function rewriteM3u8(body, baseUrl, serverHost, hParam) {
   for (var li = 0; li < lines.length; li++) {
     var line = lines[li].trim();
     if (line.length === 0 || line.startsWith("#")) continue;
-    if (line.startsWith("http://") || line.startsWith("https://")) continue;
-    var absUrl = baseDir + line;
-    lines[li] = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(absUrl) + hParam;
+    if (line.startsWith(serverHost)) continue;
+    if (line.startsWith("http://") || line.startsWith("https://")) {
+      lines[li] = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(line) + hParam;
+    } else {
+      var absUrl = baseDir + line;
+      lines[li] = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(absUrl) + hParam;
+    }
   }
   return lines.join("\n");
 }
