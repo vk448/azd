@@ -1855,6 +1855,33 @@ async function handleRequest(request) {
       return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
+    var availMatch = url.match(/^\/api\/availability\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (availMatch) {
+      var avAnilistId = Number(availMatch[1]);
+      var avEpisode = Number(availMatch[2]);
+      var avLang = availMatch[3];
+
+      var avResults = { neko: false, koto: false };
+
+      var [avNeko, avKoto] = await Promise.allSettled([
+        scrapeVaromine(avAnilistId, avEpisode, avLang, "neko").then(function(d) { return !!d; }),
+        scrapeVaromine(avAnilistId, avEpisode, avLang, "koto").then(function(d) { return !!d; })
+      ]);
+
+      if (avNeko.status === "fulfilled") avResults.neko = avNeko.value;
+      if (avKoto.status === "fulfilled") avResults.koto = avKoto.value;
+
+      if (!avResults.neko && !avResults.koto) {
+        var avCacheKey = "ak-" + avAnilistId + "-" + avEpisode;
+        var avSources = getScrapeCache(avCacheKey) || await scrapeAnikage(avAnilistId, avEpisode);
+        if (avSources.neko && avSources.neko[avLang]) avResults.neko = true;
+        if (avSources.koto && avSources.koto[avLang]) avResults.koto = true;
+      }
+
+      avResults.any = avResults.neko || avResults.koto;
+      return new Response(JSON.stringify(avResults), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+    }
+
     var dlMatch = url.match(/^\/api\/download\/(\d+)\/episode\/(\d+)$/);
     if (dlMatch) {
       var dlAnilistId = Number(dlMatch[1]);
