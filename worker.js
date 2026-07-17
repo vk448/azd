@@ -1336,14 +1336,26 @@ const PLAYER_HTML = `<!DOCTYPE html>
   const src=cfg.m3u8;
 
   function initSubs(){
-    if(!cfg.tracks||cfg.tracks.length===0)return;
-    var hasSub=false;
-    cfg.tracks.forEach(function(trk,i){
-      if(trk.kind!=="captions"&&trk.kind!=="subtitles")return;
-      hasSub=true;
+    var tracks=cfg.tracks||[];
+    var subTracks=tracks.filter(function(t){return t.kind==="captions"||t.kind==="subtitles"});
+    subTracks.forEach(function(trk,i){
       var el=document.createElement("track");el.kind=trk.kind;el.src=trk.file;el.label=trk.label||"Sub "+(i+1);el.srclang=trk.label?trk.label.substring(0,2).toLowerCase():"en";if(trk.default)el.default=true;video.appendChild(el);
     });
-    if(hasSub){subVal.textContent="1 Track"}
+    subOptions.innerHTML='<div class="option-row selected" data-sub="-1"><span>Off</span><span class="dot"></span></div>';
+    subTracks.forEach(function(trk,i){
+      var row=document.createElement("div");row.className="option-row";row.setAttribute("data-sub",String(i));
+      row.innerHTML='<span>'+((trk.label||"Sub "+(i+1)).replace(/</g,"&lt;"))+'</span><span class="dot"></span>';
+      subOptions.appendChild(row);
+    });
+    if(subTracks.length>0){subVal.textContent=subTracks.length+" Track"+(subTracks.length>1?"s":"")}
+    subOptions.querySelectorAll(".option-row").forEach(function(row){
+      row.addEventListener("click",function(){
+        var idx=parseInt(row.getAttribute("data-sub"),10);
+        for(var j=0;j<video.textTracks.length;j++){video.textTracks[j].mode=idx===j?"showing":"hidden"}
+        subVal.textContent=idx===-1?"Off":(row.querySelector("span").textContent||"Track "+(idx+1));
+        subOptions.querySelectorAll(".option-row").forEach(function(r){r.classList.remove("selected")});row.classList.add("selected");closeMenu();
+      });
+    });
   }
 
   function togglePlay(){
@@ -1493,14 +1505,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
     document.querySelectorAll('#qualityOptions .option-row').forEach(function(r){r.classList.remove('selected')});row.classList.add('selected');closeMenu()
   });
 
-  document.querySelectorAll('#panelSub .option-row').forEach(function(row){
-    row.addEventListener('click',function(){
-      var idx=parseInt(row.getAttribute('data-sub'),10);
-      for(var i=0;i<video.textTracks.length;i++){video.textTracks[i].mode=idx===i?'showing':'hidden'}
-      subVal.textContent=idx===-1?'Off':(row.querySelector('span').textContent||'Track '+(idx+1));
-      document.querySelectorAll('#panelSub .option-row').forEach(function(r){r.classList.remove('selected')});row.classList.add('selected');closeMenu()
-    })
-  });
+  // sub option rows are now bound dynamically in initSubs()
 })();
 </script>
 </body>
