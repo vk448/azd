@@ -1384,7 +1384,12 @@ async function handleRequest(request) {
       if (isM3u8) {
         var body = await r.text();
         var hParam = customHeaders ? "&headers=" + encodeURIComponent(customHeaders) : "";
-        var rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
+        var rewritten;
+        if (targetUrl.indexOf("megacloud.animanga.fun") > -1) {
+          rewritten = body;
+        } else {
+          rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
+        }
         var respHeaders = { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=60" };
         Object.assign(respHeaders, corsHeaders);
         // Cache rewritten m3u8 for 60s
