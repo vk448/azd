@@ -1429,6 +1429,38 @@ async function handleRequest(request) {
       return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
+    function serveAnikageServer(aniId, ep, lang, serverName) {
+      return async function() {
+        var wTitle = "";
+        var wInfo = getScrapeCache("al-" + aniId);
+        if (wInfo) { wTitle = wInfo.title; }
+        if (!wTitle) {
+          try {
+            var wGql = JSON.stringify({ query: "{ Media(id:" + aniId + ",type:ANIME){ title{romaji english} } }" });
+            var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
+            var wGd = await wGr.json();
+            var wGm = wGd.data && wGd.data.Media;
+            if (wGm) { wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + aniId, { malId: null, title: wTitle }); }
+          } catch {}
+        }
+        var wCacheKey = "ak-" + aniId + "-" + ep;
+        var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
+        var wData = wSources[serverName] && wSources[serverName][lang];
+        if (!wData) return new Response(lang.toUpperCase() + " not available on " + serverName + " for ep " + ep, { status: 404, headers: corsHeaders });
+        var ANI_HEADERS_ENC = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
+        function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS_ENC; }
+        var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(wData.m3u8)), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep };
+        var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
+        return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+      };
+    }
+
+    var watchNekoMatch = url.match(/^\/api\/watch\/neko\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchNekoMatch) return await serveAnikageServer(Number(watchNekoMatch[1]), Number(watchNekoMatch[2]), watchNekoMatch[3], "neko")();
+
+    var watchKotoMatch = url.match(/^\/api\/watch\/koto\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchKotoMatch) return await serveAnikageServer(Number(watchKotoMatch[1]), Number(watchKotoMatch[2]), watchKotoMatch[3], "koto")();
+
     var watchAkMatch = url.match(/^\/api\/watch\/ak\/(\d+)\/(\d+)\/(sub|dub)$/);
     if (watchAkMatch) {
       var wAnilistId2 = Number(watchAkMatch[1]);
@@ -1446,7 +1478,6 @@ async function handleRequest(request) {
           if (wGm2) { wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || ""; cacheScrape("al-" + wAnilistId2, { malId: null, title: wTitle2 }); }
         } catch {}
       }
-      // Use cache if available (anime-embed likely already scraped)
       var wAkCacheKey = "ak-" + wAnilistId2 + "-" + wEpisode2;
       var wAkSources = getScrapeCache(wAkCacheKey) || await scrapeAnikage(wAnilistId2, wEpisode2);
       var wAkData = null, wServerName = "";
