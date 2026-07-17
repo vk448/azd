@@ -377,7 +377,7 @@ function formatResult(source, meta) {
 
 async function getSource(embedId, site) {
   var base = site === "vidtube" ? VIDTUBE_BASE : MEGAPLAY_BASE;
-  var r = await fetch(base + "/stream/getSources?id=" + embedId + "&id=" + embedId, {
+  var r = await fetch(base + "/stream/getSources?id=" + embedId, {
     headers: { "User-Agent": UA, "Referer": base + "/", "X-Requested-With": "XMLHttpRequest" }
   });
   if (!r.ok) throw new Error("getSources " + embedId + ": " + r.status);
