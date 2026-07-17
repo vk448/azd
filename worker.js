@@ -1444,7 +1444,7 @@ async function handleRequest(request) {
             var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
             var wGd = await wGr.json();
             var wGm = wGd.data && wGd.data.Media;
-            if (wGm) { wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + aniId, { malId: null, title: wTitle }); }
+            if (wGm) { wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + aniId, { title: wTitle }); }
           } catch {}
         }
         var wCacheKey = "ak-" + aniId + "-" + ep;
@@ -1477,7 +1477,7 @@ async function handleRequest(request) {
           var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql2 });
           var wGd2 = await wGr2.json();
           var wGm2 = wGd2.data && wGd2.data.Media;
-          if (wGm2) { wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || ""; cacheScrape("al-" + wAnilistId2, { malId: null, title: wTitle2 }); }
+          if (wGm2) { wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || ""; cacheScrape("al-" + wAnilistId2, { title: wTitle2 }); }
         } catch {}
       }
       var wAkCacheKey = "ak-" + wAnilistId2 + "-" + wEpisode2;
