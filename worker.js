@@ -223,6 +223,101 @@ async function anikageGetSources(slug, episode, provider, lang) {
   return await r.json();
 }
 
+const VAROMINE_API = "https://anikage-scraper-api.sapis.workers.dev";
+
+async function scrapeVaromine(anilistId, episode, lang, serverName) {
+  var cacheKey = "vm-" + anilistId + "-" + episode + "-" + lang + "-" + (serverName || "default");
+  var cached = getScrapeCache(cacheKey);
+  if (cached) return cached;
+
+  try {
+    var provider = serverName === "koto" ? "&provider=koto" : "";
+    var url = VAROMINE_API + "/api/streams?slug=" + anilistId + "&episode=" + episode + "&lang=" + (lang || "sub") + provider;
+    var r = await fetch(url);
+    if (!r.ok) return null;
+    var data = await r.json();
+    if (!data.success || !data.data) return null;
+
+    var sources = data.data.sources || [];
+    var embeds = data.data.embeds || [];
+    var subtitles = data.data.subtitles || [];
+
+    var softsubs = sources.filter(function(s) { return s.type === "softsub" && s.isM3U8; });
+    var hardsubs = sources.filter(function(s) { return s.type === "hardsub" && s.isM3U8; });
+
+    var bestEmbed = null;
+    if (lang === "dub") {
+      bestEmbed = embeds.find(function(e) { return e.type === "dub"; }) || softsubs[0] || hardsubs[0];
+    } else if (serverName === "koto") {
+      var kotoEmbed = embeds.find(function(e) { return e.url && e.url.indexOf("megaplay") > -1; }) || embeds.find(function(e) { return e.url && e.url.indexOf("vidtube") > -1; }) || embeds.find(function(e) { return e.url && e.url.indexOf("vidwish") > -1; });
+      bestEmbed = kotoEmbed || hardsubs[0] || softsubs[0];
+    } else {
+      bestEmbed = softsubs[0] || hardsubs[0];
+    }
+
+    if (!bestEmbed) return null;
+    var embedUrl = bestEmbed.embedUrl || bestEmbed.url || "";
+    if (!embedUrl) return null;
+
+    var m3u8Url = await scrapeM3u8FromEmbed(embedUrl);
+    if (!m3u8Url) return null;
+
+    var tracks = subtitles.map(function(sub) {
+      return { file: sub.file || sub.url || "", label: sub.label || "Unknown", kind: sub.kind || "captions", default: sub.default || false };
+    });
+
+    var result = {
+      m3u8: m3u8Url,
+      embedUrl: embedUrl,
+      tracks: tracks,
+      intro: data.data.intro || { start: 0, end: 0 },
+      outro: data.data.outro || { start: 0, end: 0 },
+      allSources: sources.map(function(s) {
+        return { url: s.streamUrl || "", quality: s.quality, type: s.type, embedUrl: s.embedUrl || "" };
+      }),
+      allEmbeds: embeds.map(function(e) {
+        return { url: e.url, type: e.type, server: e.server };
+      })
+    };
+
+    cacheScrape(cacheKey, result);
+    return result;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function scrapeM3u8FromEmbed(embedUrl) {
+  try {
+    var r = await fetch(embedUrl, {
+      headers: { "User-Agent": UA, "Referer": "https://anikage.cc/" }
+    });
+    if (!r.ok) return null;
+    var html = await r.text();
+    var m3u8Regex = /https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/g;
+    var matches = html.match(m3u8Regex);
+    if (matches && matches.length > 0) return matches[0];
+    var srcRegex = /src\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/g;
+    var srcMatch = srcRegex.exec(html);
+    if (srcMatch) return srcMatch[1];
+    var dataIdMatch = html.match(/data-id="([^"]+)"/);
+    if (dataIdMatch) {
+      var origin = new URL(embedUrl).origin;
+      var srcUrl = origin + "/stream/getSources?id=" + dataIdMatch[1];
+      var r2 = await fetch(srcUrl, {
+        headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" }
+      });
+      if (r2.ok) {
+        var srcData = await r2.json();
+        if (srcData && srcData.sources && srcData.sources.file) return srcData.sources.file;
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function scrapeAnikage(slugOrId, episode) {
   var cacheKey = "ak-" + slugOrId + "-" + episode;
   var cached = getScrapeCache(cacheKey);
@@ -1557,12 +1652,32 @@ async function handleRequest(request) {
       return async function() {
         var wAnilistInfo = await fetchAnilistInfo(aniId);
         var wTitle = wAnilistInfo.title;
-        var wCacheKey = "ak-" + aniId + "-" + ep;
-        var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
-        var wData = wSources[serverName] && wSources[serverName][lang];
+        var wData = null;
+
+        if (serverName === "neko" || serverName === "koto") {
+          wData = await scrapeVaromine(aniId, ep, lang, serverName);
+          if (!wData) {
+            var wCacheKey = "ak-" + aniId + "-" + ep;
+            var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
+            wData = wSources[serverName] && wSources[serverName][lang];
+          }
+        } else {
+          var wCacheKey2 = "ak-" + aniId + "-" + ep;
+          var wSources2 = getScrapeCache(wCacheKey2) || await scrapeAnikage(aniId, ep);
+          wData = wSources2[serverName] && wSources2[serverName][lang];
+        }
+
         if (!wData) return new Response(lang.toUpperCase() + " not available on " + serverName + " for ep " + ep, { status: 404, headers: corsHeaders });
-        var AK_HDRS = encodeURIComponent(JSON.stringify(VIDNEST_HEADERS));
-        var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + AK_HDRS, tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep };
+        var streamReferer = "https://vivibebe.site/";
+        if (wData.embedUrl && wData.embedUrl.includes("bibiemb")) streamReferer = "https://bibiemb.xyz/";
+        else if (wData.embedUrl && wData.embedUrl.includes("otakuhg")) streamReferer = "https://otakuhg.site/";
+        else if (wData.embedUrl && wData.embedUrl.includes("otakuvid")) streamReferer = "https://otakuvid.online/";
+        else if (wData.embedUrl && wData.embedUrl.includes("megaplay")) streamReferer = "https://megaplay.buzz/";
+        else if (wData.embedUrl && wData.embedUrl.includes("vidtube")) streamReferer = "https://vidtube.site/";
+        else if (wData.embedUrl && wData.embedUrl.includes("vidwish")) streamReferer = "https://vidwish.live/";
+        if (wData.m3u8 && wData.m3u8.includes("nekostream")) streamReferer = "https://megaplay.buzz/";
+        var AK_HDRS = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": streamReferer }));
+        var wCfg = { m3u8: wData.m3u8 ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + AK_HDRS : "", tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS : "" }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep, embedUrl: wData.embedUrl || "", allSources: wData.allSources || [], allEmbeds: wData.allEmbeds || [] };
         var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
         return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
       };
