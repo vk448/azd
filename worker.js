@@ -176,6 +176,15 @@ const WORKER_DOMAINS = [
   "official9animedownloader2.workerforcloud2.workers.dev",
 ];
 
+function buildWorkerUrl(code) {
+  return WORKER_DOMAINS.map(function(d) { return "https://" + d + "/" + code; });
+}
+
+function extractCodeFromUrl(url) {
+  var m = url.match(/\/([A-Za-z0-9+/=]+)$/);
+  return m ? m[1] : null;
+}
+
 const CDN_HEADERS = {
   "User-Agent": UA,
   "Referer": "https://megaplay.buzz/",
@@ -458,6 +467,109 @@ function renderList(links,containerId,tag){
 renderList(DATA.sub,'subContainer','sub');
 renderList(DATA.dub,'dubContainer','dub');
 </script>
+</body>
+</html>`;
+
+const DOWNLOAD_PAGE_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>animezilla — {{TITLE}} episode {{EPISODE}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0a0f;--bg-2:#111116;--card:#151519;--line:rgba(255,255,255,0.08);--line-strong:rgba(255,255,255,0.14);--text:#f2f1ea;--text-dim:#8d8b96;--sun:#ffc93c;--ember:#ff4d2e;--ember-deep:#c81e3a}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:radial-gradient(ellipse 900px 500px at 50% -10%,rgba(255,77,46,0.20),transparent 60%),radial-gradient(ellipse 700px 500px at 85% 10%,rgba(255,201,60,0.10),transparent 55%),var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden}
+.noise{position:fixed;inset:0;pointer-events:none;opacity:0.035;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");z-index:0}
+nav{display:flex;align-items:center;justify-content:space-between;max-width:1100px;margin:0 auto;padding:28px 24px 0;position:relative;z-index:2}
+.brand{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:3px;color:var(--text)}
+.brand span{color:var(--ember)}
+main{max-width:1100px;margin:0 auto;padding:60px 24px 100px;position:relative;z-index:2}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--sun);border:1px solid rgba(255,201,60,0.35);background:rgba(255,201,60,0.06);padding:6px 14px;border-radius:100px;margin-bottom:20px}
+.eyebrow::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--ember);box-shadow:0 0 8px 2px var(--ember)}
+.layout{display:grid;grid-template-columns:340px 1fr;gap:56px;align-items:start}
+.poster-wrap{position:relative;border-radius:20px;padding:3px;background:linear-gradient(155deg,var(--sun),var(--ember) 55%,var(--ember-deep));box-shadow:0 0 50px -10px rgba(255,77,46,0.55),0 0 90px -30px rgba(255,201,60,0.35)}
+.poster{border-radius:18px;overflow:hidden;aspect-ratio:3/4;background:#000;position:relative}
+.poster img{width:100%;height:100%;object-fit:cover;display:block}
+.poster .badge{position:absolute;top:14px;left:14px;font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:1.5px;background:rgba(10,10,15,0.75);backdrop-filter:blur(6px);border:1px solid var(--line-strong);padding:6px 12px;border-radius:8px;color:var(--sun)}
+.title-block{padding-top:6px}
+h1{font-family:'Bebas Neue',sans-serif;font-size:58px;line-height:0.95;letter-spacing:1px;margin:0 0 8px;background:linear-gradient(180deg,#fff,#d9d7cf 60%,var(--sun));-webkit-background-clip:text;background-clip:text;color:transparent}
+.meta-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:28px}
+.pill{font-size:13px;font-weight:500;padding:8px 16px;border-radius:100px;border:1px solid var(--line);background:var(--card);color:var(--text-dim);display:flex;align-items:center;gap:6px}
+.pill.hot{border-color:rgba(255,77,46,0.4);color:#ffd3c2;background:rgba(255,77,46,0.08)}
+.ep-panel{border:1px solid var(--line);background:linear-gradient(180deg,var(--card),var(--bg-2));border-radius:16px;padding:22px 24px;margin-bottom:28px}
+.ep-panel-top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
+.ep-current{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px}
+.ep-current .num{color:var(--sun)}
+.ep-progress{font-size:12px;color:var(--text-dim)}
+.ep-scroll{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.ep-scroll::-webkit-scrollbar{display:none}
+.ep-chip{flex:0 0 auto;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;border:1px solid var(--line);color:var(--text-dim);cursor:pointer;transition:all .18s ease;text-decoration:none}
+.ep-chip:hover{border-color:var(--line-strong);color:var(--text)}
+.ep-chip.active{background:linear-gradient(155deg,var(--sun),var(--ember));color:#1a0a05;border-color:transparent;box-shadow:0 0 16px -2px rgba(255,77,46,0.7)}
+.actions{display:flex;gap:14px;flex-wrap:wrap}
+.btn{font-family:'Inter',sans-serif;font-size:14.5px;font-weight:600;padding:15px 28px;border-radius:12px;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:10px;transition:transform .15s ease,box-shadow .15s ease;text-decoration:none}
+.btn:active{transform:scale(0.97)}
+.btn-primary{background:linear-gradient(120deg,var(--ember),var(--ember-deep));color:#fff;box-shadow:0 8px 30px -8px rgba(255,77,46,0.65)}
+.btn-primary:hover{box-shadow:0 10px 36px -6px rgba(255,77,46,0.8)}
+.btn-ghost{background:transparent;color:var(--text);border:1px solid var(--line-strong)}
+.btn-ghost:hover{border-color:var(--sun);color:var(--sun)}
+.dl-section{margin-bottom:24px}
+.dl-section-title{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;color:var(--sun);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.dl-links{display:flex;flex-direction:column;gap:8px}
+.dl-link{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.03);border:1px solid var(--line);border-radius:12px;padding:14px 18px;text-decoration:none;color:var(--text);transition:all .2s ease}
+.dl-link:hover{border-color:rgba(255,77,46,0.4);background:rgba(255,77,46,0.05);transform:translateY(-1px);box-shadow:0 4px 20px rgba(255,77,46,0.1)}
+.dl-quality{font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:1px;color:var(--sun);min-width:60px}
+.dl-server{flex:1;font-size:13px;color:var(--text-dim)}
+.dl-link svg{color:var(--ember);flex-shrink:0}
+.dl-link:hover svg{color:var(--sun)}
+.no-links{background:rgba(255,255,255,0.03);border:1px solid var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--text-dim);font-size:14px}
+footer{text-align:center;color:var(--text-dim);font-size:12px;padding:20px 24px 40px;position:relative;z-index:2}
+@media(max-width:820px){.layout{grid-template-columns:1fr}.poster-wrap{max-width:260px;margin:0 auto}h1{font-size:42px;text-align:center}.subtitle{margin:0 auto 24px;text-align:center}.meta-row,.actions{justify-content:center}.title-block{text-align:center}.ep-panel-top{flex-direction:column;align-items:center;gap:6px;text-align:center}.ep-scroll{justify-content:center}.dl-section-title{justify-content:center}.dl-links{align-items:center}.dl-link{max-width:360px;width:100%}}
+@media(prefers-reduced-motion:no-preference){.poster-wrap{animation:float 5s ease-in-out infinite}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="noise"></div>
+<nav>
+  <div class="brand">anime<span>zilla</span></div>
+</nav>
+<main>
+  <div class="eyebrow">download</div>
+  <div class="layout">
+    <div class="poster-wrap">
+      <div class="poster">
+        <span class="badge">HD · 1080p</span>
+        <img src="{{COVER}}" alt="{{TITLE}}" />
+      </div>
+    </div>
+    <div class="title-block">
+      <h1>{{TITLE}}</h1>
+      <div class="meta-row">
+        {{RATING_PILL}}
+        {{GENRES_PILLS}}
+      </div>
+      <div class="ep-panel">
+        <div class="ep-panel-top">
+          <div class="ep-current">episode <span class="num">{{EPISODE}}</span></div>
+          <div class="ep-progress">{{EPISODE}} of {{TOTAL_EPS}} episodes</div>
+        </div>
+        <div class="ep-scroll">{{EP_SCROLL}}</div>
+      </div>
+      <div class="dl-section-wrap">{{DOWNLOAD_LINKS}}</div>
+      <div class="actions" style="margin-top:24px">
+        <a class="btn btn-primary" href="{{WATCH_URL}}" target="_blank"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Watch Now</a>
+      </div>
+    </div>
+  </div>
+</main>
+<footer>animezilla — download</footer>
 </body>
 </html>`;
 
@@ -1709,6 +1821,81 @@ async function handleRequest(request) {
       var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wAkData.m3u8) + "&headers=" + AK_HDRS2, tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS2 }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2 };
       var wPage2 = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg2) + ";</script></head>");
       return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+    }
+
+    var dlMatch = url.match(/^\/api\/download\/(\d+)\/episode\/(\d+)$/);
+    if (dlMatch) {
+      var dlAnilistId = Number(dlMatch[1]);
+      var dlEpisode = Number(dlMatch[2]);
+
+      var dlAnilistInfo = await fetchAnilistInfo(dlAnilistId);
+      var dlTitle = dlAnilistInfo.title || "Unknown";
+      var dlCover = dlAnilistInfo.coverImage || "";
+      var dlMalId = dlAnilistInfo.malId || null;
+
+      var dlInfoPromise = fetch(VAROMINE_API + "/api/info?slug=" + dlAnilistId).then(function(r) { return r.json(); }).catch(function() { return null; });
+      var dlEpsPromise = fetch(VAROMINE_API + "/api/episodes?slug=" + dlAnilistId).then(function(r) { return r.json(); }).catch(function() { return null; });
+      var dlDlPromise = dlMalId ? getDownloadLinksCached(dlMalId, dlEpisode) : Promise.resolve(null);
+
+      var [dlInfoRes, dlEpsRes, dlDlData] = await Promise.all([dlInfoPromise, dlEpsPromise, dlDlPromise]);
+
+      var dlInfo = dlInfoRes && dlInfoRes.data ? dlInfoRes.data : {};
+      var dlEpList = dlEpsRes && dlEpsRes.data ? (Array.isArray(dlEpsRes.data) ? dlEpsRes.data : []) : [];
+      var dlTotalEps = dlInfo.totalEpisodes || dlEpList.length || 24;
+      var dlGenres = dlInfo.genres || [];
+      var dlRating = dlInfo.rating || "";
+      var dlSubLinks = dlDlData && dlDlData.sub ? dlDlData.sub : [];
+      var dlDubLinks = dlDlData && dlDlData.dub ? dlDlData.dub : [];
+
+      if (!dlCover && dlInfo.coverImage) dlCover = dlInfo.coverImage.extraLarge || dlInfo.coverImage.large || dlInfo.coverImage.medium || "";
+      if (!dlTitle && dlInfo.title) dlTitle = dlInfo.title.english || dlInfo.title.romaji || dlInfo.title.userPreferred || "";
+
+      var dlCurrentEp = dlInfo.currentEpisode || dlEpList.length || dlEpisode;
+      var dlAiredEps = Math.max(dlCurrentEp, dlEpisode);
+      if (dlTotalEps > 0 && dlAiredEps > dlTotalEps) dlAiredEps = dlTotalEps;
+
+      var epScrollHtml = "";
+      var epStart = Math.max(1, dlEpisode - 4);
+      var epEnd = Math.min(dlAiredEps, dlEpisode + 7);
+      for (var ei = epStart; ei <= epEnd; ei++) {
+        var isActive = ei === dlEpisode ? " active" : "";
+        epScrollHtml += '<a class="ep-chip' + isActive + '" href="/api/download/' + dlAnilistId + '/episode/' + ei + '">' + String(ei).padStart(2, "0") + "</a>";
+      }
+
+      var downloadLinksHtml = "";
+      if (dlSubLinks.length > 0) {
+        downloadLinksHtml += '<div class="dl-section"><div class="dl-section-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-5"/></svg> Sub (English)</div><div class="dl-links">';
+        dlSubLinks.forEach(function(link) {
+          var workerUrl = link.workerUrls && link.workerUrls[0] ? link.workerUrls[0] : link.url;
+          downloadLinksHtml += '<a class="dl-link" href="' + workerUrl + '" target="_blank" rel="noopener"><span class="dl-quality">' + (link.quality || "Default") + '</span><span class="dl-server">Download</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>';
+        });
+        downloadLinksHtml += "</div></div>";
+      }
+      if (dlDubLinks.length > 0) {
+        downloadLinksHtml += '<div class="dl-section"><div class="dl-section-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-5"/></svg> Dub</div><div class="dl-links">';
+        dlDubLinks.forEach(function(link) {
+          var workerUrl = link.workerUrls && link.workerUrls[0] ? link.workerUrls[0] : link.url;
+          downloadLinksHtml += '<a class="dl-link" href="' + workerUrl + '" target="_blank" rel="noopener"><span class="dl-quality">' + (link.quality || "Default") + '</span><span class="dl-server">Download</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>';
+        });
+        downloadLinksHtml += "</div></div>";
+      }
+      if (!downloadLinksHtml) downloadLinksHtml = '<div class="no-links">No download links available for this episode.</div>';
+
+      var genresPills = dlGenres.map(function(g) { return '<span class="pill">' + g.toLowerCase() + "</span>"; }).join("");
+      var ratingPill = dlRating ? '<span class="pill hot">\u2605 ' + (typeof dlRating === "number" ? dlRating.toFixed(1) : dlRating) + " rating</span>" : "";
+      var watchUrl = "https://animezilla.pages.dev/pages/watch/" + (dlInfo.slug || dlAnilistId) + "--" + dlAnilistId + "-al/" + dlEpisode + "?lang=sub";
+
+      var dlPage = DOWNLOAD_PAGE_HTML.replace(/\{\{TITLE\}\}/g, dlTitle)
+        .replace(/\{\{COVER\}\}/g, dlCover)
+        .replace(/\{\{EPISODE\}\}/g, String(dlEpisode).padStart(2, "0"))
+        .replace(/\{\{TOTAL_EPS\}\}/g, dlAiredEps)
+        .replace(/\{\{EP_SCROLL\}\}/g, epScrollHtml)
+        .replace(/\{\{RATING_PILL\}\}/g, ratingPill)
+        .replace(/\{\{GENRES_PILLS\}\}/g, genresPills)
+        .replace(/\{\{DOWNLOAD_LINKS\}\}/g, downloadLinksHtml)
+        .replace(/\{\{WATCH_URL\}\}/g, watchUrl);
+
+      return new Response(dlPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
     return new Response("Not found", { status: 404, headers: corsHeaders });
