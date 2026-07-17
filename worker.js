@@ -201,11 +201,14 @@ const ANIKAGE_HEADERS = {
   "Origin": "https://anikage.cc",
   "Accept": "application/json, text/plain, */*",
 };
+const VIDNEST_HEADERS = { "User-Agent": UA, "Referer": "https://vidnest.fun/", "Origin": "https://vidnest.fun", "Accept": "*/*" };
 
 function anikageBuildProxyUrl(token, type) {
   if (!token) return "";
-  if (token.startsWith("http://") || token.startsWith("https://")) return token;
-  return ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token;
+  var rawUrl;
+  if (token.startsWith("http://") || token.startsWith("https://")) { rawUrl = token; } else { rawUrl = ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token; }
+  var hdrs = encodeURIComponent(JSON.stringify(ANIKAGE_HEADERS));
+  return ANIKAGE_MEGACLOUD_PROXY + "?url=" + encodeURIComponent(rawUrl) + "&headers=" + hdrs;
 }
 
 async function anikageGetServers(slug, episode) {
@@ -1334,10 +1337,11 @@ async function handleRequest(request) {
     if (akMatch) {
       var aHash = akMatch[1];
       var aConfig = getConfig(aHash) || {};
-      var ANI_HEADERS = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9" }));
-      function wrapAni(url) { return "https://megacloud.animanga.fun/proxy?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS; }
-      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(aConfig.m3u8));
-      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) }); }); }
+      var ANI_HEADERS = encodeURIComponent(JSON.stringify(ANIKAGE_HEADERS));
+      var VND_HEADERS = encodeURIComponent(JSON.stringify(VIDNEST_HEADERS));
+      function wrapAni(url) { return ANIKAGE_MEGACLOUD_PROXY + "?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS; }
+      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(aConfig.m3u8)) + "&headers=" + VND_HEADERS;
+      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) + "&headers=" + VND_HEADERS }); }); }
       var playerPageA = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(aConfig) + ";</script></head>");
       return new Response(playerPageA, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
@@ -1457,7 +1461,7 @@ async function handleRequest(request) {
         var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
         var wData = wSources[serverName] && wSources[serverName][lang];
         if (!wData) return new Response(lang.toUpperCase() + " not available on " + serverName + " for ep " + ep, { status: 404, headers: corsHeaders });
-        var AK_HDRS = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*" }));
+        var AK_HDRS = encodeURIComponent(JSON.stringify(VIDNEST_HEADERS));
         var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + AK_HDRS, tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep };
         var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
         return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
@@ -1486,7 +1490,7 @@ async function handleRequest(request) {
         if (srv && srv[wLang2]) { wAkData = srv[wLang2]; wServerName = targetServers[si]; break; }
       }
       if (!wAkData) return new Response(wLang2.toUpperCase() + " not available for ep " + wEpisode2, { status: 404, headers: corsHeaders });
-      var AK_HDRS2 = encodeURIComponent(JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Referer": "https://anikage.cc/", "Origin": "https://anikage.cc", "Accept": "*/*" }));
+      var AK_HDRS2 = encodeURIComponent(JSON.stringify(VIDNEST_HEADERS));
       var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wAkData.m3u8) + "&headers=" + AK_HDRS2, tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS2 }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2 };
       var wPage2 = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg2) + ";</script></head>");
       return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
