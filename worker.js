@@ -1855,30 +1855,53 @@ async function handleRequest(request) {
       return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
-    var availMatch = url.match(/^\/api\/availability\/(\d+)\/(\d+)\/(sub|dub)$/);
+    var availMatch = url.match(/^\/api\/availability\/(\d+)\/(\d+)$/);
     if (availMatch) {
       var avAnilistId = Number(availMatch[1]);
       var avEpisode = Number(availMatch[2]);
-      var avLang = availMatch[3];
 
-      var avResults = { neko: false, koto: false };
+      var avResults = {
+        neko: { sub: false, dub: false },
+        koto: { sub: false, dub: false },
+        megaplay: { sub: false, dub: false }
+      };
 
-      var [avNeko, avKoto] = await Promise.allSettled([
-        scrapeVaromine(avAnilistId, avEpisode, avLang, "neko").then(function(d) { return !!d; }),
-        scrapeVaromine(avAnilistId, avEpisode, avLang, "koto").then(function(d) { return !!d; })
+      var [avNekoSub, avNekoDub, avKotoSub, avKotoDub] = await Promise.allSettled([
+        scrapeVaromine(avAnilistId, avEpisode, "sub", "neko").then(function(d) { return !!d; }),
+        scrapeVaromine(avAnilistId, avEpisode, "dub", "neko").then(function(d) { return !!d; }),
+        scrapeVaromine(avAnilistId, avEpisode, "sub", "koto").then(function(d) { return !!d; }),
+        scrapeVaromine(avAnilistId, avEpisode, "dub", "koto").then(function(d) { return !!d; })
       ]);
 
-      if (avNeko.status === "fulfilled") avResults.neko = avNeko.value;
-      if (avKoto.status === "fulfilled") avResults.koto = avKoto.value;
+      if (avNekoSub.status === "fulfilled") avResults.neko.sub = avNekoSub.value;
+      if (avNekoDub.status === "fulfilled") avResults.neko.dub = avNekoDub.value;
+      if (avKotoSub.status === "fulfilled") avResults.koto.sub = avKotoSub.value;
+      if (avKotoDub.status === "fulfilled") avResults.koto.dub = avKotoDub.value;
 
-      if (!avResults.neko && !avResults.koto) {
+      var avNeedFallback = !avResults.neko.sub && !avResults.neko.dub && !avResults.koto.sub && !avResults.koto.dub;
+      if (avNeedFallback) {
         var avCacheKey = "ak-" + avAnilistId + "-" + avEpisode;
         var avSources = getScrapeCache(avCacheKey) || await scrapeAnikage(avAnilistId, avEpisode);
-        if (avSources.neko && avSources.neko[avLang]) avResults.neko = true;
-        if (avSources.koto && avSources.koto[avLang]) avResults.koto = true;
+        if (avSources.neko) {
+          if (avSources.neko.sub) avResults.neko.sub = true;
+          if (avSources.neko.dub) avResults.neko.dub = true;
+        }
+        if (avSources.koto) {
+          if (avSources.koto.sub) avResults.koto.sub = true;
+          if (avSources.koto.dub) avResults.koto.dub = true;
+        }
       }
 
-      avResults.any = avResults.neko || avResults.koto;
+      var avAnilistInfo = await fetchAnilistInfo(avAnilistId);
+      var avMalId = avAnilistInfo.malId;
+      if (avMalId) {
+        try {
+          var avMp = await scrapeMegaplay(avMalId, avEpisode);
+          if (avMp.sub) avResults.megaplay.sub = true;
+          if (avMp.dub) avResults.megaplay.dub = true;
+        } catch (e) {}
+      }
+
       return new Response(JSON.stringify(avResults), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
