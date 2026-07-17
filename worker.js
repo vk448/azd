@@ -1350,10 +1350,12 @@ async function handleRequest(request) {
       var targetUrl = reqUrl.searchParams.get("url");
       if (!targetUrl) return new Response("Missing url param", { status: 400 });
       var customHeaders = reqUrl.searchParams.get("headers");
-      var fetchHeaders = Object.assign({}, CDN_HEADERS);
+      var isMegacloud = targetUrl.indexOf("megacloud.animanga.fun") > -1;
+      var fetchHeaders = isMegacloud ? {} : Object.assign({}, CDN_HEADERS);
       if (customHeaders) {
         try { var parsed = JSON.parse(customHeaders); Object.assign(fetchHeaders, parsed); } catch {}
       }
+      if (!fetchHeaders["User-Agent"]) fetchHeaders["User-Agent"] = UA;
 
       // Check proxy cache
       var pCacheKey = "p-" + targetUrl;
@@ -1384,12 +1386,7 @@ async function handleRequest(request) {
       if (isM3u8) {
         var body = await r.text();
         var hParam = customHeaders ? "&headers=" + encodeURIComponent(customHeaders) : "";
-        var rewritten;
-        if (targetUrl.indexOf("megacloud.animanga.fun") > -1) {
-          rewritten = body;
-        } else {
-          rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
-        }
+        var rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
         var respHeaders = { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=60" };
         Object.assign(respHeaders, corsHeaders);
         // Cache rewritten m3u8 for 60s
