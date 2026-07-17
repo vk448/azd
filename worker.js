@@ -1189,6 +1189,34 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
+async function fetchAnilistInfo(anilistId) {
+  var cacheKey = "al-" + anilistId;
+  var cached = getScrapeCache(cacheKey);
+  if (cached && cached.title && cached.malId) return cached;
+  if (cached && cached.title && !cached.malId) {
+    try {
+      var ar = await fetch("https://anikage.cc/api/media/anime/" + anilistId, { headers: { "User-Agent": UA } });
+      if (ar.ok) { var ad = await ar.json(); if (ad && ad.anime && ad.anime.malId) { cached.malId = ad.anime.malId; cacheScrape(cacheKey, cached); return cached; } }
+    } catch {}
+  }
+  try {
+    var wGql = JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english} } }" });
+    var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
+    var wGd = await wGr.json();
+    var wGm = wGd.data && wGd.data.Media;
+    if (wGm) {
+      var info = { malId: wGm.idMal, title: (wGm.title && (wGm.title.english || wGm.title.romaji)) || "" };
+      cacheScrape(cacheKey, info);
+      return info;
+    }
+  } catch {}
+  try {
+    var ar2 = await fetch("https://anikage.cc/api/media/anime/" + anilistId, { headers: { "User-Agent": UA } });
+    if (ar2.ok) { var ad2 = await ar2.json(); if (ad2 && ad2.anime) { var info2 = { malId: ad2.anime.malId || null, title: ad2.anime.title && (ad2.anime.title.english || ad2.anime.title.romaji) || "" }; cacheScrape(cacheKey, info2); return info2; } }
+  } catch {}
+  return { malId: null, title: "" };
+}
+
 function rewriteM3u8(body, baseUrl, serverHost, hParam) {
   var lines = body.split("\n");
   var baseDir = baseUrl.substring(0, baseUrl.lastIndexOf("/") + 1);
@@ -1235,12 +1263,7 @@ async function handleRequest(request) {
       var episode = Number(embedMatch[2]);
 
       // Fetch AniList info and run anikage in PARALLEL (anikage doesn't need malId)
-      var aniInfoPromise = (function() {
-        var cacheKey = "al-" + anilistId;
-        var cached = getScrapeCache(cacheKey);
-        if (cached) return Promise.resolve(cached);
-        return fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: JSON.stringify({ query: "{ Media(id:" + anilistId + ",type:ANIME){ idMal title{romaji english native} } }" }) }).then(function(r) { return r.json(); }).then(function(gd) { var gm = gd.data && gd.data.Media; if (gm) { var info = { malId: gm.idMal, title: gm.title && (gm.title.english || gm.title.romaji || gm.title.native) || "" }; cacheScrape(cacheKey, info); return info; } return { malId: null, title: "" }; }).catch(function() { return { malId: null, title: "" }; });
-      })();
+      var aniInfoPromise = fetchAnilistInfo(anilistId);
 
       var akPromise = scrapeAnikage(anilistId, episode).catch(function() { return {}; });
 
@@ -1411,19 +1434,8 @@ async function handleRequest(request) {
       var wAnilistId = Number(watchMegaMatch[1]);
       var wEpisode = Number(watchMegaMatch[2]);
       var wLang = watchMegaMatch[3];
-      var wMalId = null, wTitle = "";
-      // Check AniList cache
-      var wInfoCached = getScrapeCache("al-" + wAnilistId);
-      if (wInfoCached) { wMalId = wInfoCached.malId; wTitle = wInfoCached.title; }
-      if (!wMalId) {
-        try {
-          var wGql = JSON.stringify({ query: "{ Media(id:" + wAnilistId + ",type:ANIME){ idMal title{romaji english} } }" });
-          var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
-          var wGd = await wGr.json();
-          var wGm = wGd.data && wGd.data.Media;
-          if (wGm) { wMalId = wGm.idMal; wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || ""; cacheScrape("al-" + wAnilistId, { malId: wMalId, title: wTitle }); }
-        } catch {}
-      }
+      var wAnilistInfo = await fetchAnilistInfo(wAnilistId);
+      var wMalId = wAnilistInfo.malId, wTitle = wAnilistInfo.title;
       if (!wMalId) return new Response("MAL ID not found for anilist " + wAnilistId, { status: 404, headers: corsHeaders });
       // Use cache if available (anime-embed likely already scraped)
       var wCacheKey = "mp-" + wMalId + "-" + wEpisode;
@@ -1439,22 +1451,8 @@ async function handleRequest(request) {
 
     function serveAnikageServer(aniId, ep, lang, serverName) {
       return async function() {
-        var wTitle = "", wMalId = null;
-        var wInfo = getScrapeCache("al-" + aniId);
-        if (wInfo) { wTitle = wInfo.title; wMalId = wInfo.malId || null; }
-        if (!wTitle || !wMalId) {
-          try {
-            var wGql = JSON.stringify({ query: "{ Media(id:" + aniId + ",type:ANIME){ idMal title{romaji english} } }" });
-            var wGr = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql });
-            var wGd = await wGr.json();
-            var wGm = wGd.data && wGd.data.Media;
-            if (wGm) {
-              if (!wTitle) wTitle = (wGm.title && (wGm.title.english || wGm.title.romaji)) || "";
-              if (!wMalId) wMalId = wGm.idMal || null;
-              cacheScrape("al-" + aniId, { title: wTitle, malId: wMalId });
-            }
-          } catch {}
-        }
+        var wAnilistInfo = await fetchAnilistInfo(aniId);
+        var wTitle = wAnilistInfo.title;
         var wCacheKey = "ak-" + aniId + "-" + ep;
         var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
         var wData = wSources[serverName] && wSources[serverName][lang];
@@ -1477,22 +1475,8 @@ async function handleRequest(request) {
       var wAnilistId2 = Number(watchAkMatch[1]);
       var wEpisode2 = Number(watchAkMatch[2]);
       var wLang2 = watchAkMatch[3];
-      var wTitle2 = "", wMalId2 = null;
-      var wInfoCached2 = getScrapeCache("al-" + wAnilistId2);
-      if (wInfoCached2) { wTitle2 = wInfoCached2.title; wMalId2 = wInfoCached2.malId || null; }
-      if (!wTitle2 || !wMalId2) {
-        try {
-          var wGql2 = JSON.stringify({ query: "{ Media(id:" + wAnilistId2 + ",type:ANIME){ idMal title{romaji english} } }" });
-          var wGr2 = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA, "Accept": "application/json" }, body: wGql2 });
-          var wGd2 = await wGr2.json();
-          var wGm2 = wGd2.data && wGd2.data.Media;
-          if (wGm2) {
-            if (!wTitle2) wTitle2 = (wGm2.title && (wGm2.title.english || wGm2.title.romaji)) || "";
-            if (!wMalId2) wMalId2 = wGm2.idMal || null;
-            cacheScrape("al-" + wAnilistId2, { title: wTitle2, malId: wMalId2 });
-          }
-        } catch {}
-      }
+      var wAnilistInfo2 = await fetchAnilistInfo(wAnilistId2);
+      var wTitle2 = wAnilistInfo2.title;
       var wAkCacheKey = "ak-" + wAnilistId2 + "-" + wEpisode2;
       var wAkSources = getScrapeCache(wAkCacheKey) || await scrapeAnikage(wAnilistId2, wEpisode2);
       var wAkData = null, wServerName = "";
