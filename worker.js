@@ -1979,6 +1979,38 @@ async function handleRequest(request) {
       return new Response(JSON.stringify(emResults), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
+    var dubCountMatch = url.match(/^\/api\/dubcount\/(\d+)$/);
+    if (dubCountMatch) {
+      var dcAnilistId = Number(dubCountMatch[1]);
+      var dcInfo = await fetchAnilistInfo(dcAnilistId);
+      var dcTotalEps = dcInfo.totalEpisodes || 100;
+      if (dcTotalEps > 300) dcTotalEps = 300;
+      var dcSample = [];
+      var dcStep = Math.max(1, Math.floor(dcTotalEps / 20));
+      for (var dcI = 1; dcI <= dcTotalEps; dcI += dcStep) dcSample.push(dcI);
+      if (!dcSample.includes(1)) dcSample.unshift(1);
+      if (!dcSample.includes(dcTotalEps)) dcSample.push(dcTotalEps);
+      var dcResults = await Promise.allSettled(dcSample.map(function(ep) {
+        return scrapeVaromine(dcAnilistId, ep, "dub", "neko").then(function(d) { return { ep: ep, dub: !!d }; }).catch(function() { return { ep: ep, dub: false }; });
+      }));
+      var dcDubEps = [];
+      var dcNoDubEps = [];
+      for (var dcR = 0; dcR < dcResults.length; dcR++) {
+        if (dcResults[dcR].status === "fulfilled") {
+          if (dcResults[dcR].value.dub) dcDubEps.push(dcResults[dcR].value.ep);
+          else dcNoDubEps.push(dcResults[dcR].value.ep);
+        }
+      }
+      var dcEstimate = dcTotalEps;
+      if (dcNoDubEps.length > 0 && dcDubEps.length > 0) {
+        var dcLastDub = Math.max.apply(null, dcDubEps);
+        dcEstimate = dcLastDub;
+      } else if (dcDubEps.length === 0) {
+        dcEstimate = 0;
+      }
+      return new Response(JSON.stringify({ anilistId: dcAnilistId, totalEpisodes: dcTotalEps, dubbedEpisodes: dcEstimate, sampleChecked: dcSample.length, sampleWithDub: dcDubEps.length, sampleWithoutDub: dcNoDubEps.length }), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+    }
+
     var dlMatch = url.match(/^\/api\/download\/(\d+)\/episode\/(\d+)$/);
     if (dlMatch) {
       var dlAnilistId = Number(dlMatch[1]);
