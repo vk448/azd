@@ -1685,16 +1685,34 @@ async function handleRequest(request) {
       var wEpisode = Number(watchMegaMatch[2]);
       var wLang = watchMegaMatch[3];
       var wAnilistInfo = await fetchAnilistInfo(wAnilistId);
-      var wMalId = wAnilistInfo.malId, wTitle = wAnilistInfo.title;
-      if (!wMalId) return new Response("MAL ID not found for anilist " + wAnilistId, { status: 404, headers: corsHeaders });
-      // Use cache if available (anime-embed likely already scraped)
-      var wCacheKey = "mp-" + wMalId + "-" + wEpisode;
-      var wSources = getScrapeCache(wCacheKey) || await scrapeBoth(wMalId, wEpisode);
-      var wData = wSources[wLang];
-      if (!wData) return new Response(wLang.toUpperCase() + " not available for ep " + wEpisode, { status: 404, headers: corsHeaders });
-      var wCfg = { m3u8: wData.m3u8, tracks: wData.tracks || [], intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode };
-      wCfg.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wCfg.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
-      if (wCfg.tracks) { wCfg.tracks = wCfg.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" })) }); }); }
+      var wTitle = wAnilistInfo.title;
+      var wCacheKey = "mp-" + wAnilistId + "-" + wEpisode + "-" + wLang;
+      var wData = getScrapeCache(wCacheKey);
+      if (!wData) {
+        try {
+          var mpUrl = "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang;
+          var mpRes = await fetch(mpUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
+          if (!mpRes.ok) return new Response(wLang.toUpperCase() + " not available on MegaPlay for ep " + wEpisode, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+          var mpHtml = await mpRes.text();
+          var mpM3u8 = null;
+          var mpTracks = [];
+          var mpMatch = mpHtml.match(/(?:file|source)\s*[:=]\s*["']([^"']*\.m3u8[^"']*)/i);
+          if (mpMatch) mpM3u8 = mpMatch[1];
+          if (!mpM3u8) {
+            var mpMatch2 = mpHtml.match(/(https?:\/\/[^"'\s]*\.m3u8[^"'\s]*)/i);
+            if (mpMatch2) mpM3u8 = mpMatch2[1];
+          }
+          if (mpM3u8) {
+            wData = { m3u8: mpM3u8, tracks: mpTracks, intro: null, outro: null };
+            cacheScrape(wCacheKey, wData);
+          }
+        } catch (e) { wData = null; }
+      }
+      if (!wData) {
+        var notAvailPage = '<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,#1a0505 0%,#060202 70%);font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;color:#ffe6e8;display:flex;align-items:center;justify-content:center;overflow:hidden}.box{text-align:center;padding:40px;border:1px solid rgba(255,30,60,0.3);border-radius:16px;background:rgba(255,30,60,0.05);backdrop-filter:blur(10px);max-width:400px}.icon{width:60px;height:60px;margin:0 auto 20px;border-radius:50%;background:linear-gradient(135deg,#ff6b35,#f72585);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(255,30,60,0.3)}.icon svg{width:28px;height:28px;fill:#fff}h2{font-size:18px;margin-bottom:8px;color:#ff6b35}p{font-size:13px;color:rgba(255,230,232,0.5);line-height:1.5}.tag{display:inline-block;margin-top:16px;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:1px;background:rgba(255,107,53,0.15);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)}</style></head><body><div class="box"><div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div><h2>Not Available</h2><p>' + wLang.toUpperCase() + ' stream not available on<br><strong>MEGAPLAY</strong> for Episode ' + wEpisode + '</p><div class="tag">TRY ANOTHER SERVER</div></div></body></html>';
+        return new Response(notAvailPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+      }
+      var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })) : "" }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode, embedUrl: "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang };
       var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
       return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
