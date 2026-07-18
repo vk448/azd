@@ -208,6 +208,12 @@ const ANIKAGE_HEADERS = {
   "Accept": "application/json, text/plain, */*",
 };
 
+const ANIKOTO_API_BASE = "https://anikotoapi.site";
+const ANIKOTO_HEADERS = {
+  "User-Agent": UA,
+  "Accept": "application/json",
+};
+
 async function scrapeEmbeds(anilistId, episode, lang, serverName) {
   var cacheKey = "se-" + anilistId + "-" + episode + "-" + lang + "-" + (serverName || "default");
   var cached = getScrapeCache(cacheKey);
@@ -1476,6 +1482,99 @@ async function fetchAnilistInfo(anilistId) {
   return { malId: null, title: "" };
 }
 
+async function findAnikotoEmbedUrl(aniId, ep, lang) {
+  var cacheKey = "ak-" + aniId + "-" + ep + "-" + lang;
+  var cached = getScrapeCache(cacheKey);
+  if (cached !== undefined) return cached || null;
+
+  try {
+    var found = false;
+    var seriesId = null;
+    for (var page = 1; page <= 5; page++) {
+      var listRes = await fetch(ANIKOTO_API_BASE + "/recent-anime?page=" + page + "&per_page=100", { headers: ANIKOTO_HEADERS, signal: AbortSignal.timeout(8000) });
+      if (!listRes.ok) break;
+      var listData = await listRes.json();
+      if (!listData.ok || !listData.data || listData.data.length === 0) break;
+      for (var i = 0; i < listData.data.length; i++) {
+        if (String(listData.data[i].ani_id) === String(aniId)) {
+          seriesId = listData.data[i].id;
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+      if (listData.pagination && listData.pagination.page >= listData.pagination.total_pages) break;
+    }
+    if (!seriesId) { cacheScrape(cacheKey, false); return null; }
+
+    var seriesRes = await fetch(ANIKOTO_API_BASE + "/series/" + seriesId, { headers: ANIKOTO_HEADERS, signal: AbortSignal.timeout(8000) });
+    if (!seriesRes.ok) { cacheScrape(cacheKey, false); return null; }
+    var seriesData = await seriesRes.json();
+    if (!seriesData.ok || !seriesData.data || !seriesData.data.episodes) { cacheScrape(cacheKey, false); return null; }
+
+    var episodes = seriesData.data.episodes;
+    var targetEp = null;
+    for (var j = 0; j < episodes.length; j++) {
+      if (Number(episodes[j].number) === Number(ep)) { targetEp = episodes[j]; break; }
+    }
+    if (!targetEp || !targetEp.embed_url) { cacheScrape(cacheKey, false); return null; }
+
+    var embedUrl = targetEp.embed_url[lang];
+    if (!embedUrl) { cacheScrape(cacheKey, false); return null; }
+
+    cacheScrape(cacheKey, embedUrl);
+    return embedUrl;
+  } catch (e) {
+    cacheScrape(cacheKey, false);
+    return null;
+  }
+}
+
+async function checkAnikotoAvailability(aniId, ep) {
+  var cacheKey = "ak-av-" + aniId + "-" + ep;
+  var cached = getScrapeCache(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    var found = false;
+    var seriesId = null;
+    for (var page = 1; page <= 3; page++) {
+      var listRes = await fetch(ANIKOTO_API_BASE + "/recent-anime?page=" + page + "&per_page=100", { headers: ANIKOTO_HEADERS, signal: AbortSignal.timeout(5000) });
+      if (!listRes.ok) break;
+      var listData = await listRes.json();
+      if (!listData.ok || !listData.data || listData.data.length === 0) break;
+      for (var i = 0; i < listData.data.length; i++) {
+        if (String(listData.data[i].ani_id) === String(aniId)) {
+          seriesId = listData.data[i].id;
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!seriesId) { cacheScrape(cacheKey, { sub: false, dub: false }); return { sub: false, dub: false }; }
+
+    var seriesRes = await fetch(ANIKOTO_API_BASE + "/series/" + seriesId, { headers: ANIKOTO_HEADERS, signal: AbortSignal.timeout(5000) });
+    if (!seriesRes.ok) { cacheScrape(cacheKey, { sub: false, dub: false }); return { sub: false, dub: false }; }
+    var seriesData = await seriesRes.json();
+    if (!seriesData.ok || !seriesData.data || !seriesData.data.episodes) { cacheScrape(cacheKey, { sub: false, dub: false }); return { sub: false, dub: false }; }
+
+    var episodes = seriesData.data.episodes;
+    var targetEp = null;
+    for (var j = 0; j < episodes.length; j++) {
+      if (Number(episodes[j].number) === Number(ep)) { targetEp = episodes[j]; break; }
+    }
+    if (!targetEp || !targetEp.embed_url) { cacheScrape(cacheKey, { sub: false, dub: false }); return { sub: false, dub: false }; }
+
+    var result = { sub: !!targetEp.embed_url.sub, dub: !!targetEp.embed_url.dub };
+    cacheScrape(cacheKey, result);
+    return result;
+  } catch (e) {
+    cacheScrape(cacheKey, { sub: false, dub: false });
+    return { sub: false, dub: false };
+  }
+}
+
 function rewriteM3u8(body, baseUrl, serverHost, hParam) {
   var lines = body.split("\n");
   var baseDir = baseUrl.substring(0, baseUrl.lastIndexOf("/") + 1);
@@ -1688,26 +1787,57 @@ async function handleRequest(request) {
       var wTitle = wAnilistInfo.title;
       var wCacheKey = "mp-" + wAnilistId + "-" + wEpisode + "-" + wLang;
       var wData = getScrapeCache(wCacheKey);
+      var wEmbedUrl = "";
+
       if (!wData) {
         try {
-          var mpUrl = "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang;
-          var mpRes = await fetch(mpUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
+          var akEmbedUrl = await findAnikotoEmbedUrl(wAnilistId, wEpisode, wLang);
+          if (akEmbedUrl) {
+            wEmbedUrl = akEmbedUrl;
+            var akPageRes = await fetch(akEmbedUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
+            if (akPageRes.ok) {
+              var akHtml = await akPageRes.text();
+              var akDataIdMatch = akHtml.match(/data-id="(\d+)"/);
+              if (akDataIdMatch) {
+                var akSrcRes = await fetch("https://megaplay.buzz/stream/getSources?id=" + akDataIdMatch[1], {
+                  headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/", "X-Requested-With": "XMLHttpRequest" }
+                });
+                if (akSrcRes.ok) {
+                  var akSrcData = await akSrcRes.json();
+                  if (akSrcData && akSrcData.sources && akSrcData.sources.file) {
+                    var akTracks = [];
+                    if (akSrcData.tracks && akSrcData.tracks.length) {
+                      akTracks = akSrcData.tracks.map(function(t) { return { file: t.file || "", label: t.label || "Unknown", kind: t.kind || "captions", default: t.default || false }; });
+                    }
+                    wData = { m3u8: akSrcData.sources.file, tracks: akTracks, intro: akSrcData.intro || null, outro: akSrcData.outro || null };
+                    cacheScrape(wCacheKey, wData);
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) { wData = null; }
+      }
+
+      if (!wData) {
+        try {
+          if (!wEmbedUrl) wEmbedUrl = "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang;
+          var mpRes = await fetch(wEmbedUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
           if (mpRes.ok) {
             var mpHtml = await mpRes.text();
             var dataIdMatch = mpHtml.match(/data-id="(\d+)"/);
             if (dataIdMatch) {
-              var mpDataId = dataIdMatch[1];
-              var srcRes = await fetch("https://megaplay.buzz/stream/getSources?id=" + mpDataId, {
+              var mpSrcRes = await fetch("https://megaplay.buzz/stream/getSources?id=" + dataIdMatch[1], {
                 headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/", "X-Requested-With": "XMLHttpRequest" }
               });
-              if (srcRes.ok) {
-                var srcData = await srcRes.json();
-                if (srcData && srcData.sources && srcData.sources.file) {
+              if (mpSrcRes.ok) {
+                var mpSrcData = await mpSrcRes.json();
+                if (mpSrcData && mpSrcData.sources && mpSrcData.sources.file) {
                   var mpTracks = [];
-                  if (srcData.tracks && srcData.tracks.length) {
-                    mpTracks = srcData.tracks.map(function(t) { return { file: t.file || "", label: t.label || "Unknown", kind: t.kind || "captions", default: t.default || false }; });
+                  if (mpSrcData.tracks && mpSrcData.tracks.length) {
+                    mpTracks = mpSrcData.tracks.map(function(t) { return { file: t.file || "", label: t.label || "Unknown", kind: t.kind || "captions", default: t.default || false }; });
                   }
-                  wData = { m3u8: srcData.sources.file, tracks: mpTracks, intro: srcData.intro || null, outro: srcData.outro || null };
+                  wData = { m3u8: mpSrcData.sources.file, tracks: mpTracks, intro: mpSrcData.intro || null, outro: mpSrcData.outro || null };
                   cacheScrape(wCacheKey, wData);
                 }
               }
@@ -1715,11 +1845,12 @@ async function handleRequest(request) {
           }
         } catch (e) { wData = null; }
       }
+
       if (!wData) {
         var notAvailPage = '<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,#1a0505 0%,#060202 70%);font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;color:#ffe6e8;display:flex;align-items:center;justify-content:center;overflow:hidden}.box{text-align:center;padding:40px;border:1px solid rgba(255,30,60,0.3);border-radius:16px;background:rgba(255,30,60,0.05);backdrop-filter:blur(10px);max-width:400px}.icon{width:60px;height:60px;margin:0 auto 20px;border-radius:50%;background:linear-gradient(135deg,#ff6b35,#f72585);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(255,30,60,0.3)}.icon svg{width:28px;height:28px;fill:#fff}h2{font-size:18px;margin-bottom:8px;color:#ff6b35}p{font-size:13px;color:rgba(255,230,232,0.5);line-height:1.5}.tag{display:inline-block;margin-top:16px;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:1px;background:rgba(255,107,53,0.15);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)}</style></head><body><div class="box"><div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div><h2>Not Available</h2><p>' + wLang.toUpperCase() + ' stream not available on<br><strong>MEGAPLAY</strong> for Episode ' + wEpisode + '</p><div class="tag">TRY ANOTHER SERVER</div></div></body></html>';
         return new Response(notAvailPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
       }
-      var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })) : "" }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode, embedUrl: "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang };
+      var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })) : "" }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode, embedUrl: wEmbedUrl || "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang };
       var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
       return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
@@ -1829,7 +1960,14 @@ async function handleRequest(request) {
 
       var avAnilistInfo = await fetchAnilistInfo(avAnilistId);
       var avMalId = avAnilistInfo.malId;
-      if (avMalId) {
+
+      try {
+        var avAkResult = await checkAnikotoAvailability(avAnilistId, avEpisode);
+        if (avAkResult.sub) { avResults.megaplay.sub = true; }
+        if (avAkResult.dub) { avResults.megaplay.dub = true; }
+      } catch (e) {}
+
+      if (!avResults.megaplay.sub || !avResults.megaplay.dub) {
         try {
           var avMpUrl = "https://megaplay.buzz/stream/ani/" + avAnilistId + "/" + avEpisode + "/sub";
           var avMpRes = await fetch(avMpUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
