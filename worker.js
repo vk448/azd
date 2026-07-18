@@ -1692,19 +1692,26 @@ async function handleRequest(request) {
         try {
           var mpUrl = "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang;
           var mpRes = await fetch(mpUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
-          if (!mpRes.ok) return new Response(wLang.toUpperCase() + " not available on MegaPlay for ep " + wEpisode, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
-          var mpHtml = await mpRes.text();
-          var mpM3u8 = null;
-          var mpTracks = [];
-          var mpMatch = mpHtml.match(/(?:file|source)\s*[:=]\s*["']([^"']*\.m3u8[^"']*)/i);
-          if (mpMatch) mpM3u8 = mpMatch[1];
-          if (!mpM3u8) {
-            var mpMatch2 = mpHtml.match(/(https?:\/\/[^"'\s]*\.m3u8[^"'\s]*)/i);
-            if (mpMatch2) mpM3u8 = mpMatch2[1];
-          }
-          if (mpM3u8) {
-            wData = { m3u8: mpM3u8, tracks: mpTracks, intro: null, outro: null };
-            cacheScrape(wCacheKey, wData);
+          if (mpRes.ok) {
+            var mpHtml = await mpRes.text();
+            var dataIdMatch = mpHtml.match(/data-id="(\d+)"/);
+            if (dataIdMatch) {
+              var mpDataId = dataIdMatch[1];
+              var srcRes = await fetch("https://megaplay.buzz/stream/getSources?id=" + mpDataId, {
+                headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/", "X-Requested-With": "XMLHttpRequest" }
+              });
+              if (srcRes.ok) {
+                var srcData = await srcRes.json();
+                if (srcData && srcData.sources && srcData.sources.file) {
+                  var mpTracks = [];
+                  if (srcData.tracks && srcData.tracks.length) {
+                    mpTracks = srcData.tracks.map(function(t) { return { file: t.file || "", label: t.label || "Unknown", kind: t.kind || "captions", default: t.default || false }; });
+                  }
+                  wData = { m3u8: srcData.sources.file, tracks: mpTracks, intro: srcData.intro || null, outro: srcData.outro || null };
+                  cacheScrape(wCacheKey, wData);
+                }
+              }
+            }
           }
         } catch (e) { wData = null; }
       }
@@ -1824,9 +1831,20 @@ async function handleRequest(request) {
       var avMalId = avAnilistInfo.malId;
       if (avMalId) {
         try {
-          var avMp = await scrapeMegaplay(avMalId, avEpisode);
-          if (avMp.sub) avResults.megaplay.sub = true;
-          if (avMp.dub) avResults.megaplay.dub = true;
+          var avMpUrl = "https://megaplay.buzz/stream/ani/" + avAnilistId + "/" + avEpisode + "/sub";
+          var avMpRes = await fetch(avMpUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
+          if (avMpRes.ok) {
+            var avMpHtml = await avMpRes.text();
+            if (avMpHtml.match(/data-id="\d+"/)) { avResults.megaplay.sub = true; }
+          }
+        } catch (e) {}
+        try {
+          var avMpUrlDub = "https://megaplay.buzz/stream/ani/" + avAnilistId + "/" + avEpisode + "/dub";
+          var avMpResDub = await fetch(avMpUrlDub, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
+          if (avMpResDub.ok) {
+            var avMpHtmlDub = await avMpResDub.text();
+            if (avMpHtmlDub.match(/data-id="\d+"/)) { avResults.megaplay.dub = true; }
+          }
         } catch (e) {}
       }
 
