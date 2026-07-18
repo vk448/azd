@@ -334,6 +334,7 @@ async function scrapeAnikage(slugOrId, episode) {
 
   var serversData = await anikageGetServers(slugOrId, episode);
   var servers = serversData.servers || [];
+  var embedsList = serversData.embeds || [];
   var results = { neko: { sub: null, dub: null }, koto: { sub: null, dub: null }, serverList: servers.map(function(s) { return s.id; }) };
   var targetServers = ["neko", "koto"];
 
@@ -363,6 +364,7 @@ async function scrapeAnikage(slugOrId, episode) {
       else if (hardsubs.length > 0) bestSource = hardsubs[0];
       else if (allM3u8.length > 0) bestSource = allM3u8[0];
       if (!bestSource) return null;
+      var allEmbedUrls = (srcData.embeds || []).map(function(e) { return e.url; });
       return {
         serverId: t.serverId, lang: t.lang,
         m3u8: anikageBuildProxyUrl(bestSource.url, "m3u8"),
@@ -370,7 +372,9 @@ async function scrapeAnikage(slugOrId, episode) {
         intro: srcData.intro || { start: 0, end: 0 },
         outro: srcData.outro || { start: 0, end: 0 },
         quality: bestSource.quality, source: bestSource.type,
-        allSources: (srcData.sources || []).map(function(s) { return { url: anikageBuildProxyUrl(s.url, "m3u8"), quality: s.quality, type: s.type, embedUrl: s.embedUrl }; })
+        allSources: (srcData.sources || []).map(function(s) { return { url: anikageBuildProxyUrl(s.url, "m3u8"), quality: s.quality, type: s.type, embedUrl: s.embedUrl }; }),
+        allEmbeds: allEmbedUrls,
+        embedOptions: srcData.embedOptions || []
       };
     }).catch(function() { return null; });
   }));
@@ -382,12 +386,73 @@ async function scrapeAnikage(slugOrId, episode) {
       m3u8: r.m3u8, tracks: r.tracks,
       intro: r.intro, outro: r.outro,
       server: r.serverId, source: r.source, quality: r.quality,
-      allSources: r.allSources || []
+      allSources: r.allSources || [],
+      allEmbeds: r.allEmbeds || [],
+      embedOptions: r.embedOptions || []
     };
+  }
+
+  var needFallback = (!results.neko.sub && !results.neko.dub) || (!results.koto.sub && !results.koto.dub);
+  if (needFallback) {
+    var embedResults = await scrapeAnikageEmbeds(slugOrId, episode, "sub");
+    if (embedResults.neko && !results.neko.sub) {
+      results.neko.sub = { m3u8: embedResults.neko.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "neko", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
+    }
+    if (embedResults.koto && !results.koto.sub) {
+      results.koto.sub = { m3u8: embedResults.koto.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "koto", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
+    }
+    var dubEmbedResults = await scrapeAnikageEmbeds(slugOrId, episode, "dub");
+    if (dubEmbedResults.neko && !results.neko.dub) {
+      results.neko.dub = { m3u8: dubEmbedResults.neko.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "neko", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
+    }
+    if (dubEmbedResults.koto && !results.koto.dub) {
+      results.koto.dub = { m3u8: dubEmbedResults.koto.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "koto", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
+    }
   }
 
   cacheScrape(cacheKey, results);
   return results;
+}
+
+async function scrapeAnikageEmbeds(slugOrId, episode, lang) {
+  var cacheKey = "ake-" + slugOrId + "-" + episode + "-" + (lang || "sub");
+  var cached = getScrapeCache(cacheKey);
+  if (cached) return cached;
+
+  var providers = ["neko", "koto"];
+  var embedLists = await Promise.allSettled(providers.map(function(p) {
+    return anikageGetSources(slugOrId, episode, p, lang || "sub").then(function(d) {
+      return (d.embeds || []).map(function(e) { return { url: e.url, server: e.server, type: e.type, provider: p }; });
+    }).catch(function() { return []; });
+  }));
+
+  var allEmbeds = [];
+  for (var i = 0; i < embedLists.length; i++) {
+    if (embedLists[i].status === "fulfilled") allEmbeds.push.apply(allEmbeds, embedLists[i].value);
+  }
+
+  var working = [];
+  var embedTasks = allEmbeds.map(function(e) {
+    return scrapeM3u8FromEmbed(e.url).then(function(m3u8) {
+      if (m3u8) return { m3u8: m3u8, embedUrl: e.url, server: e.server, type: e.type, provider: e.provider };
+      return null;
+    }).catch(function() { return null; });
+  });
+  var embedResults = await Promise.allSettled(embedTasks);
+  for (var j = 0; j < embedResults.length; j++) {
+    if (embedResults[j].status === "fulfilled" && embedResults[j].value) working.push(embedResults[j].value);
+  }
+
+  var result = { neko: null, koto: null };
+  if (working.length >= 2) {
+    result.neko = working[0];
+    result.koto = working[1];
+  } else if (working.length === 1) {
+    result.neko = working[0];
+  }
+
+  cacheScrape(cacheKey, result);
+  return result;
 }
 
 const DOWNLOAD_HTML = `<!DOCTYPE html>
@@ -1903,6 +1968,15 @@ async function handleRequest(request) {
       }
 
       return new Response(JSON.stringify(avResults), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+    }
+
+    var embedsMatch = url.match(/^\/api\/embeds\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (embedsMatch) {
+      var emAnilistId = Number(embedsMatch[1]);
+      var emEpisode = Number(embedsMatch[2]);
+      var emLang = embedsMatch[3];
+      var emResults = await scrapeAnikageEmbeds(emAnilistId, emEpisode, emLang);
+      return new Response(JSON.stringify(emResults), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
     var dlMatch = url.match(/^\/api\/download\/(\d+)\/episode\/(\d+)$/);
