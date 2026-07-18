@@ -1783,7 +1783,10 @@ async function handleRequest(request) {
       var avKeys = [];
       for (var avi = 0; avi < avServers.length; avi++) {
         for (var avj = 0; avj < avLangs.length; avj++) {
-          avPromises.push(scrapeVaromine(avAnilistId, avEpisode, avLangs[avj], avServers[avi]).then(function(d) { return !!d; }).catch(function() { return false; }));
+          (function(srv, lang) {
+            var apiUrl = ANIKAGE_API_BASE + "/" + avAnilistId + "/episodes/" + avEpisode + "/sources?provider=" + srv + "&lang=" + lang;
+            avPromises.push(fetch(apiUrl, { headers: ANIKAGE_HEADERS }).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { return !!(d && d.embeds && d.embeds.length > 0); }).catch(function() { return false; }));
+          })(avServers[avi], avLangs[avj]);
           avKeys.push({ server: avServers[avi], lang: avLangs[avj] });
         }
       }
