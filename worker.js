@@ -201,89 +201,61 @@ const CDN_HEADERS = {
   "Cache-Control": "no-cache",
 };
 
-const ANIKAGE_PROXY_URL = "https://prox.anicore.tv";
-const ANIKAGE_MEGACLOUD_PROXY = "https://megacloud.animanga.fun/proxy";
 const ANIKAGE_API_BASE = "https://anikage.cc/api/media/anime";
 const ANIKAGE_HEADERS = {
   "User-Agent": UA,
   "Referer": "https://anikage.cc/",
-  "Origin": "https://anikage.cc",
   "Accept": "application/json, text/plain, */*",
 };
-const VIDNEST_HEADERS = { "User-Agent": UA, "Referer": "https://vidnest.fun/", "Origin": "https://vidnest.fun", "Accept": "*/*" };
 
-function anikageBuildProxyUrl(token, type) {
-  if (!token) return "";
-  var rawUrl;
-  if (token.startsWith("http://") || token.startsWith("https://")) { rawUrl = token; } else { rawUrl = ANIKAGE_PROXY_URL + "/" + (type || "m3u8") + "/" + token; }
-  var hdrs = encodeURIComponent(JSON.stringify(ANIKAGE_HEADERS));
-  return ANIKAGE_MEGACLOUD_PROXY + "?url=" + encodeURIComponent(rawUrl) + "&headers=" + hdrs;
-}
-
-async function anikageGetServers(slug, episode) {
-  const r = await fetch(ANIKAGE_API_BASE + "/" + slug + "/episodes/" + episode + "/servers", { headers: ANIKAGE_HEADERS });
-  if (!r.ok) throw new Error("Servers fetch failed: " + r.status);
-  return await r.json();
-}
-
-async function anikageGetSources(slug, episode, provider, lang) {
-  const r = await fetch(ANIKAGE_API_BASE + "/" + slug + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + lang, { headers: ANIKAGE_HEADERS });
-  if (!r.ok) throw new Error("Sources fetch failed: " + r.status);
-  return await r.json();
-}
-
-const VAROMINE_API = "https://anikage-scraper-api.sapis.workers.dev";
-
-async function scrapeVaromine(anilistId, episode, lang, serverName) {
-  var cacheKey = "vm-" + anilistId + "-" + episode + "-" + lang + "-" + (serverName || "default");
+async function scrapeEmbeds(anilistId, episode, lang, serverName) {
+  var cacheKey = "se-" + anilistId + "-" + episode + "-" + lang + "-" + (serverName || "default");
   var cached = getScrapeCache(cacheKey);
   if (cached) return cached;
 
   try {
-    var provider = serverName === "koto" ? "&provider=koto" : "";
-    var url = VAROMINE_API + "/api/streams?slug=" + anilistId + "&episode=" + episode + "&lang=" + (lang || "sub") + provider;
-    var r = await fetch(url);
+    var validServers = ["neko", "koto", "miko", "dib", "wave", "senshi"];
+    var provider = serverName && validServers.indexOf(serverName) > -1 ? serverName : "neko";
+    var apiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + (lang || "sub");
+    var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS });
     if (!r.ok) return null;
     var data = await r.json();
-    if (!data.success || !data.data) return null;
+    if (!data || !data.embeds || data.embeds.length === 0) return null;
 
-    var sources = data.data.sources || [];
-    var embeds = data.data.embeds || [];
-    var subtitles = data.data.subtitles || [];
+    var embeds = data.embeds || [];
+    var subtitles = data.subtitles || [];
+    var m3u8Url = null;
+    var usedEmbed = null;
 
-    var softsubs = sources.filter(function(s) { return s.type === "softsub" && s.isM3U8; });
-    var hardsubs = sources.filter(function(s) { return s.type === "hardsub" && s.isM3U8; });
-
-    var bestEmbed = null;
-    if (lang === "dub") {
-      bestEmbed = embeds.find(function(e) { return e.type === "dub"; }) || softsubs[0] || hardsubs[0];
-    } else if (serverName === "koto") {
-      var kotoEmbed = embeds.find(function(e) { return e.url && e.url.indexOf("megaplay") > -1; }) || embeds.find(function(e) { return e.url && e.url.indexOf("vidtube") > -1; }) || embeds.find(function(e) { return e.url && e.url.indexOf("vidwish") > -1; });
-      bestEmbed = kotoEmbed || hardsubs[0] || softsubs[0];
-    } else {
-      bestEmbed = softsubs[0] || hardsubs[0];
+    for (var ei = 0; ei < embeds.length; ei++) {
+      var eUrl = embeds[ei].url;
+      if (!eUrl) continue;
+      if (eUrl.match(/\.m3u8(\?|$)/)) {
+        m3u8Url = eUrl;
+        usedEmbed = eUrl;
+        break;
+      }
+      var scraped = await scrapeM3u8FromEmbed(eUrl);
+      if (scraped) {
+        m3u8Url = scraped;
+        usedEmbed = eUrl;
+        break;
+      }
     }
 
-    if (!bestEmbed) return null;
-    var embedUrl = bestEmbed.embedUrl || bestEmbed.url || "";
-    if (!embedUrl) return null;
-
-    var m3u8Url = await scrapeM3u8FromEmbed(embedUrl);
     if (!m3u8Url) return null;
 
     var tracks = subtitles.map(function(sub) {
-      return { file: sub.file || sub.url || "", label: sub.label || "Unknown", kind: sub.kind || "captions", default: sub.default || false };
+      return { file: sub.file || "", label: sub.label || "Unknown", kind: sub.kind || "captions", default: sub.default || false };
     });
 
     var result = {
       m3u8: m3u8Url,
-      embedUrl: embedUrl,
+      embedUrl: usedEmbed || "",
       tracks: tracks,
-      intro: data.data.intro || { start: 0, end: 0 },
-      outro: data.data.outro || { start: 0, end: 0 },
-      allSources: sources.map(function(s) {
-        return { url: s.streamUrl || "", quality: s.quality, type: s.type, embedUrl: s.embedUrl || "" };
-      }),
+      intro: data.intro || { start: 0, end: 0 },
+      outro: data.outro || { start: 0, end: 0 },
+      allSources: [],
       allEmbeds: embeds.map(function(e) {
         return { url: e.url, type: e.type, server: e.server };
       })
@@ -296,163 +268,56 @@ async function scrapeVaromine(anilistId, episode, lang, serverName) {
   }
 }
 
+const scrapeVaromine = scrapeEmbeds;
+
 async function scrapeM3u8FromEmbed(embedUrl) {
   try {
+    var origin = new URL(embedUrl).origin;
     var r = await fetch(embedUrl, {
-      headers: { "User-Agent": UA, "Referer": "https://anikage.cc/" }
+      headers: { "User-Agent": UA, "Referer": origin + "/" }
     });
     if (!r.ok) return null;
     var html = await r.text();
+
     var m3u8Regex = /https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/g;
     var matches = html.match(m3u8Regex);
-    if (matches && matches.length > 0) return matches[0];
+    if (matches && matches.length > 0) {
+      var filtered = matches.filter(function(u) { return u.indexOf("prox.anikage.cc") === -1 && u.indexOf("prox.anicore.tv") === -1; });
+      if (filtered.length > 0) return filtered[0];
+    }
+
     var srcRegex = /src\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/g;
-    var srcMatch = srcRegex.exec(html);
-    if (srcMatch) return srcMatch[1];
+    var srcMatch;
+    while ((srcMatch = srcRegex.exec(html)) !== null) {
+      var srcUrl = srcMatch[1];
+      if (srcUrl.indexOf("prox.anikage.cc") === -1 && srcUrl.indexOf("prox.anicore.tv") === -1) return srcUrl;
+    }
+
     var dataIdMatch = html.match(/data-id="([^"]+)"/);
     if (dataIdMatch) {
-      var origin = new URL(embedUrl).origin;
-      var srcUrl = origin + "/stream/getSources?id=" + dataIdMatch[1];
-      var r2 = await fetch(srcUrl, {
+      var srcUrl2 = origin + "/stream/getSources?id=" + dataIdMatch[1];
+      var r2 = await fetch(srcUrl2, {
         headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" }
       });
       if (r2.ok) {
         var srcData = await r2.json();
-        if (srcData && srcData.sources && srcData.sources.file) return srcData.sources.file;
+        if (srcData && srcData.sources) {
+          var srcFile = srcData.sources.file || srcData.sources[0] && srcData.sources[0].file;
+          if (srcFile && srcFile.indexOf("prox.anikage.cc") === -1 && srcFile.indexOf("prox.anicore.tv") === -1) return srcFile;
+        }
       }
     }
+
+    var configMatch = html.match(/file\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
+    if (configMatch && configMatch[1].indexOf("prox.anikage.cc") === -1) return configMatch[1];
+
+    var playerMatch = html.match(/player\s*\(\s*\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)/);
+    if (playerMatch && playerMatch[1].indexOf("prox.anikage.cc") === -1) return playerMatch[1];
+
     return null;
   } catch (e) {
     return null;
   }
-}
-
-async function scrapeAnikage(slugOrId, episode) {
-  var cacheKey = "ak-" + slugOrId + "-" + episode;
-  var cached = getScrapeCache(cacheKey);
-  if (cached) return cached;
-
-  var serversData = await anikageGetServers(slugOrId, episode);
-  var servers = serversData.servers || [];
-  var embedsList = serversData.embeds || [];
-  var results = { neko: { sub: null, dub: null }, koto: { sub: null, dub: null }, serverList: servers.map(function(s) { return s.id; }) };
-  var targetServers = ["neko", "koto"];
-
-  var tasks = [];
-  for (var si = 0; si < targetServers.length; si++) {
-    var serverId = targetServers[si];
-    var server = servers.find(function(s) { return s.id === serverId; });
-    if (!server) continue;
-    var langs = ["sub", "dub"];
-    for (var li = 0; li < langs.length; li++) {
-      var lang = langs[li];
-      if (!server.subTypes.includes(lang)) continue;
-      tasks.push({ serverId: serverId, lang: lang, slugOrId: slugOrId, episode: episode });
-    }
-  }
-
-  var taskResults = await Promise.allSettled(tasks.map(function(t) {
-    return anikageGetSources(t.slugOrId, t.episode, t.serverId, t.lang).then(function(srcData) {
-      if (!srcData.sources || srcData.sources.length === 0) return null;
-      var bestSource = null;
-      var softsubs = srcData.sources.filter(function(s) { return s.type === "softsub" && s.isM3U8; });
-      var hardsubs = srcData.sources.filter(function(s) { return s.type === "hardsub" && s.isM3U8; });
-      var dubs = srcData.sources.filter(function(s) { return s.type === "dub" && s.isM3U8; });
-      var allM3u8 = srcData.sources.filter(function(s) { return s.isM3U8; });
-      if (t.lang === "dub" && dubs.length > 0) bestSource = dubs[0];
-      else if (softsubs.length > 0) bestSource = softsubs[0];
-      else if (hardsubs.length > 0) bestSource = hardsubs[0];
-      else if (allM3u8.length > 0) bestSource = allM3u8[0];
-      if (!bestSource) return null;
-      var allEmbedUrls = (srcData.embeds || []).map(function(e) { return e.url; });
-      return {
-        serverId: t.serverId, lang: t.lang,
-        m3u8: anikageBuildProxyUrl(bestSource.url, "m3u8"),
-        tracks: (srcData.subtitles || []).map(function(sub) { return { file: anikageBuildProxyUrl(sub.file, "m3u8"), label: sub.label, kind: sub.kind, default: sub.default }; }),
-        intro: srcData.intro || { start: 0, end: 0 },
-        outro: srcData.outro || { start: 0, end: 0 },
-        quality: bestSource.quality, source: bestSource.type,
-        allSources: (srcData.sources || []).map(function(s) { return { url: anikageBuildProxyUrl(s.url, "m3u8"), quality: s.quality, type: s.type, embedUrl: s.embedUrl }; }),
-        allEmbeds: allEmbedUrls,
-        embedOptions: srcData.embedOptions || []
-      };
-    }).catch(function() { return null; });
-  }));
-
-  for (var ti = 0; ti < taskResults.length; ti++) {
-    if (taskResults[ti].status !== "fulfilled" || !taskResults[ti].value) continue;
-    var r = taskResults[ti].value;
-    results[r.serverId][r.lang] = {
-      m3u8: r.m3u8, tracks: r.tracks,
-      intro: r.intro, outro: r.outro,
-      server: r.serverId, source: r.source, quality: r.quality,
-      allSources: r.allSources || [],
-      allEmbeds: r.allEmbeds || [],
-      embedOptions: r.embedOptions || []
-    };
-  }
-
-  var needFallback = (!results.neko.sub && !results.neko.dub) || (!results.koto.sub && !results.koto.dub);
-  if (needFallback) {
-    var embedResults = await scrapeAnikageEmbeds(slugOrId, episode, "sub");
-    if (embedResults.neko && !results.neko.sub) {
-      results.neko.sub = { m3u8: embedResults.neko.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "neko", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
-    }
-    if (embedResults.koto && !results.koto.sub) {
-      results.koto.sub = { m3u8: embedResults.koto.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "koto", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
-    }
-    var dubEmbedResults = await scrapeAnikageEmbeds(slugOrId, episode, "dub");
-    if (dubEmbedResults.neko && !results.neko.dub) {
-      results.neko.dub = { m3u8: dubEmbedResults.neko.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "neko", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
-    }
-    if (dubEmbedResults.koto && !results.koto.dub) {
-      results.koto.dub = { m3u8: dubEmbedResults.koto.m3u8, tracks: [], intro: { start: 0, end: 0 }, outro: { start: 0, end: 0 }, server: "koto", source: "embed", quality: "auto", allSources: [], allEmbeds: [], embedOptions: [] };
-    }
-  }
-
-  cacheScrape(cacheKey, results);
-  return results;
-}
-
-async function scrapeAnikageEmbeds(slugOrId, episode, lang) {
-  var cacheKey = "ake-" + slugOrId + "-" + episode + "-" + (lang || "sub");
-  var cached = getScrapeCache(cacheKey);
-  if (cached) return cached;
-
-  var providers = ["neko", "koto"];
-  var embedLists = await Promise.allSettled(providers.map(function(p) {
-    return anikageGetSources(slugOrId, episode, p, lang || "sub").then(function(d) {
-      return (d.embeds || []).map(function(e) { return { url: e.url, server: e.server, type: e.type, provider: p }; });
-    }).catch(function() { return []; });
-  }));
-
-  var allEmbeds = [];
-  for (var i = 0; i < embedLists.length; i++) {
-    if (embedLists[i].status === "fulfilled") allEmbeds.push.apply(allEmbeds, embedLists[i].value);
-  }
-
-  var working = [];
-  var embedTasks = allEmbeds.map(function(e) {
-    return scrapeM3u8FromEmbed(e.url).then(function(m3u8) {
-      if (m3u8) return { m3u8: m3u8, embedUrl: e.url, server: e.server, type: e.type, provider: e.provider };
-      return null;
-    }).catch(function() { return null; });
-  });
-  var embedResults = await Promise.allSettled(embedTasks);
-  for (var j = 0; j < embedResults.length; j++) {
-    if (embedResults[j].status === "fulfilled" && embedResults[j].value) working.push(embedResults[j].value);
-  }
-
-  var result = { neko: null, koto: null };
-  if (working.length >= 2) {
-    result.neko = working[0];
-    result.koto = working[1];
-  } else if (working.length === 1) {
-    result.neko = working[0];
-  }
-
-  cacheScrape(cacheKey, result);
-  return result;
 }
 
 const DOWNLOAD_HTML = `<!DOCTYPE html>
@@ -1656,61 +1521,48 @@ async function handleRequest(request) {
       var anilistId = Number(embedMatch[1]);
       var episode = Number(embedMatch[2]);
 
-      // Fetch AniList info and run anikage in PARALLEL (anikage doesn't need malId)
-      var aniInfoPromise = fetchAnilistInfo(anilistId);
+      var aniInfoPromise2 = fetchAnilistInfo(anilistId);
+      var aniInfo2 = await aniInfoPromise2;
+      var malId2 = aniInfo2.malId;
+      var animeTitle2 = aniInfo2.title;
+      var result2 = { success: true, anilistId: anilistId, malId: malId2, ep: episode, title: animeTitle2, sources: [], downloads: null };
 
-      var akPromise = scrapeAnikage(anilistId, episode).catch(function() { return {}; });
+      var mpPromise2 = malId2 ? scrapeBoth(malId2, episode).catch(function() { return {}; }) : Promise.resolve({});
+      var dlPromise2 = malId2 ? getDownloadLinksCached(malId2, episode) : Promise.resolve(null);
 
-      var aniInfo = await aniInfoPromise;
-      var malId = aniInfo.malId;
-      var animeTitle = aniInfo.title;
-      // Fallback: if AniList returned empty title, try to get from anikage response
-      if (!animeTitle) {
-        try { var akTemp = await akPromise; if (akTemp && akTemp.title) animeTitle = akTemp.title; } catch (e) {}
-      }
-      var result = { success: true, anilistId: anilistId, malId: malId, ep: episode, title: animeTitle, sources: [], downloads: null };
+      var mpDlResults2 = await Promise.all([mpPromise2, dlPromise2]);
+      result2.downloads = mpDlResults2[1];
+      var sources2 = mpDlResults2[0];
 
-      // Wait for anikage to finish
-      var akSources = await akPromise;
-
-      // Run megaplay + downloads in parallel (need malId, but scrapeAnikage already done)
-      var mpPromise = malId ? scrapeBoth(malId, episode).catch(function() { return {}; }) : Promise.resolve({});
-      var dlPromise = malId ? getDownloadLinksCached(malId, episode) : Promise.resolve(null);
-
-      var mpDlResults = await Promise.all([mpPromise, dlPromise]);
-      var sources = mpDlResults[0];
-      result.downloads = mpDlResults[1];
-
-      // Process megaplay results
-      if (sources && typeof sources === "object") {
-        var langKeys = ["sub", "dub"];
-        for (var li = 0; li < langKeys.length; li++) {
-          var lang = langKeys[li];
-          if (sources[lang]) {
-            var s = sources[lang];
-            result.sources.push({ source: "megaplay", type: lang, m3u8: null, tracks: null, intro: s.intro || null, outro: s.outro || null, label: animeTitle + " " + lang.toUpperCase() + " (MegaPlay)", embedUrl: "" });
+      if (sources2 && typeof sources2 === "object") {
+        var langKeys3 = ["sub", "dub"];
+        for (var li3 = 0; li3 < langKeys3.length; li3++) {
+          var lang3 = langKeys3[li3];
+          if (sources2[lang3]) {
+            var s3 = sources2[lang3];
+            result2.sources.push({ source: "megaplay", type: lang3, m3u8: null, tracks: null, intro: s3.intro || null, outro: s3.outro || null, label: animeTitle2 + " " + lang3.toUpperCase() + " (MegaPlay)", embedUrl: "" });
           }
         }
       }
 
-      // Process anikage results
-      if (akSources && typeof akSources === "object") {
-        var serverNames = ["neko", "koto"];
-        for (var si = 0; si < serverNames.length; si++) {
-          var srv = akSources[serverNames[si]];
-          if (!srv) continue;
-          var langKeys2 = ["sub", "dub"];
-          for (var li2 = 0; li2 < langKeys2.length; li2++) {
-            var lang2 = langKeys2[li2];
-            if (srv[lang2]) {
-              var s2 = srv[lang2];
-              result.sources.push({ source: "anikage", server: serverNames[si], type: lang2, quality: s2.quality, m3u8: null, tracks: null, intro: s2.intro || null, outro: s2.outro || null, label: animeTitle + " " + lang2.toUpperCase() + " (" + serverNames[si] + ")", embedUrl: "" });
-            }
-          }
+      var vmServers = ["neko", "koto", "miko", "dib", "wave", "senshi"];
+      var vmLangs = ["sub", "dub"];
+      var vmPromises = [];
+      var vmKeys = [];
+      for (var vmi = 0; vmi < vmServers.length; vmi++) {
+        for (var vmj = 0; vmj < vmLangs.length; vmj++) {
+          vmPromises.push(scrapeVaromine(anilistId, episode, vmLangs[vmj], vmServers[vmi]).then(function(d) { return d ? { available: true } : null; }).catch(function() { return null; }));
+          vmKeys.push({ server: vmServers[vmi], lang: vmLangs[vmj] });
+        }
+      }
+      var vmSettled = await Promise.allSettled(vmPromises);
+      for (var vmk = 0; vmk < vmSettled.length; vmk++) {
+        if (vmSettled[vmk].status === "fulfilled" && vmSettled[vmk].value) {
+          result2.sources.push({ source: "anikage", server: vmKeys[vmk].server, type: vmKeys[vmk].lang, m3u8: null, tracks: null, intro: null, outro: null, label: animeTitle2 + " " + vmKeys[vmk].lang.toUpperCase() + " (" + vmKeys[vmk].server + ")", embedUrl: "" });
         }
       }
 
-      return new Response(JSON.stringify(result), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+      return new Response(JSON.stringify(result2), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
     var watchMatch = url.match(/^\/api\/watch-embed\/([-\w]+)$/);
@@ -1728,11 +1580,12 @@ async function handleRequest(request) {
     if (akMatch) {
       var aHash = akMatch[1];
       var aConfig = getConfig(aHash) || {};
-      var ANI_HEADERS = encodeURIComponent(JSON.stringify(ANIKAGE_HEADERS));
-      var VND_HEADERS = encodeURIComponent(JSON.stringify(VIDNEST_HEADERS));
-      function wrapAni(url) { return ANIKAGE_MEGACLOUD_PROXY + "?url=" + encodeURIComponent(url) + "&headers=" + ANI_HEADERS; }
-      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(aConfig.m3u8)) + "&headers=" + VND_HEADERS;
-      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wrapAni(t.file)) + "&headers=" + VND_HEADERS }); }); }
+      var akReferer3 = "https://vivibebe.site/";
+      if (aConfig.m3u8 && aConfig.m3u8.includes("megaplay")) akReferer3 = "https://megaplay.buzz/";
+      else if (aConfig.m3u8 && aConfig.m3u8.includes("vidtube")) akReferer3 = "https://vidtube.site/";
+      var VND_HEADERS3 = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": akReferer3 }));
+      aConfig.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(aConfig.m3u8) + "&headers=" + VND_HEADERS3;
+      if (aConfig.tracks) { aConfig.tracks = aConfig.tracks.map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + VND_HEADERS3 }); }); }
       var playerPageA = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(aConfig) + ";</script></head>");
       return new Response(playerPageA, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
@@ -1850,29 +1703,11 @@ async function handleRequest(request) {
       return async function() {
         var wAnilistInfo = await fetchAnilistInfo(aniId);
         var wTitle = wAnilistInfo.title;
-        var wData = null;
+        var wData = await scrapeVaromine(aniId, ep, lang, serverName);
 
-        if (serverName === "neko" || serverName === "koto") {
-          wData = await scrapeVaromine(aniId, ep, lang, serverName);
-          if (!wData) {
-            var wCacheKey = "ak-" + aniId + "-" + ep;
-            var wSources = getScrapeCache(wCacheKey) || await scrapeAnikage(aniId, ep);
-            wData = wSources[serverName] && wSources[serverName][lang];
-          }
-        } else {
-          var wCacheKey2 = "ak-" + aniId + "-" + ep;
-          var wSources2 = getScrapeCache(wCacheKey2) || await scrapeAnikage(aniId, ep);
-          wData = wSources2[serverName] && wSources2[serverName][lang];
-        }
-
-        if (!wData && (serverName === "neko" || serverName === "koto")) {
-          var fallbackServer = serverName === "neko" ? "koto" : "neko";
-          wData = await scrapeVaromine(aniId, ep, lang, fallbackServer);
-          if (!wData) {
-            var wFallbackCacheKey = "ak-" + aniId + "-" + ep;
-            var wFallbackSources = getScrapeCache(wFallbackCacheKey) || await scrapeAnikage(aniId, ep);
-            wData = wFallbackSources[fallbackServer] && wFallbackSources[fallbackServer][lang];
-          }
+        if (!wData) {
+          var fallbackServer = serverName === "neko" ? "koto" : serverName === "koto" ? "neko" : "";
+          if (fallbackServer) wData = await scrapeVaromine(aniId, ep, lang, fallbackServer);
           if (wData) serverName = fallbackServer;
         }
 
@@ -1884,7 +1719,10 @@ async function handleRequest(request) {
         else if (wData.embedUrl && wData.embedUrl.includes("megaplay")) streamReferer = "https://megaplay.buzz/";
         else if (wData.embedUrl && wData.embedUrl.includes("vidtube")) streamReferer = "https://vidtube.site/";
         else if (wData.embedUrl && wData.embedUrl.includes("vidwish")) streamReferer = "https://vidwish.live/";
-        if (wData.m3u8 && wData.m3u8.includes("nekostream")) streamReferer = "https://megaplay.buzz/";
+        else if (wData.embedUrl && wData.embedUrl.includes("ninstream")) streamReferer = "https://ninstream.com/";
+        else if (wData.embedUrl && wData.embedUrl.includes("playeng")) streamReferer = "https://playeng.animeapps.top/";
+        else if (wData.embedUrl && wData.embedUrl.includes("echovideo")) streamReferer = "https://play.echovideo.ru/";
+        else if (wData.embedUrl && wData.embedUrl.includes("myvidplay")) streamReferer = "https://myvidplay.com/";
         var AK_HDRS = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": streamReferer }));
         var wCfg = { m3u8: wData.m3u8 ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + AK_HDRS : "", tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS : "" }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + ep, embedUrl: wData.embedUrl || "", allSources: wData.allSources || [], allEmbeds: wData.allEmbeds || [] };
         var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
@@ -1898,24 +1736,38 @@ async function handleRequest(request) {
     var watchKotoMatch = url.match(/^\/api\/watch\/koto\/(\d+)\/(\d+)\/(sub|dub)$/);
     if (watchKotoMatch) return await serveAnikageServer(Number(watchKotoMatch[1]), Number(watchKotoMatch[2]), watchKotoMatch[3], "koto")();
 
+    var watchMikoMatch = url.match(/^\/api\/watch\/miko\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchMikoMatch) return await serveAnikageServer(Number(watchMikoMatch[1]), Number(watchMikoMatch[2]), watchMikoMatch[3], "miko")();
+
+    var watchDibMatch = url.match(/^\/api\/watch\/dib\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchDibMatch) return await serveAnikageServer(Number(watchDibMatch[1]), Number(watchDibMatch[2]), watchDibMatch[3], "dib")();
+
+    var watchWaveMatch = url.match(/^\/api\/watch\/wave\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchWaveMatch) return await serveAnikageServer(Number(watchWaveMatch[1]), Number(watchWaveMatch[2]), watchWaveMatch[3], "wave")();
+
+    var watchSenshiMatch = url.match(/^\/api\/watch\/senshi\/(\d+)\/(\d+)\/(sub|dub)$/);
+    if (watchSenshiMatch) return await serveAnikageServer(Number(watchSenshiMatch[1]), Number(watchSenshiMatch[2]), watchSenshiMatch[3], "senshi")();
+
     var watchAkMatch = url.match(/^\/api\/watch\/ak\/(\d+)\/(\d+)\/(sub|dub)$/);
     if (watchAkMatch) {
       var wAnilistId2 = Number(watchAkMatch[1]);
       var wEpisode2 = Number(watchAkMatch[2]);
       var wLang2 = watchAkMatch[3];
-      var wAnilistInfo2 = await fetchAnilistInfo(wAnilistId2);
-      var wTitle2 = wAnilistInfo2.title;
-      var wAkCacheKey = "ak-" + wAnilistId2 + "-" + wEpisode2;
-      var wAkSources = getScrapeCache(wAkCacheKey) || await scrapeAnikage(wAnilistId2, wEpisode2);
-      var wAkData = null, wServerName = "";
-      var targetServers = ["neko", "koto"];
-      for (var si = 0; si < targetServers.length; si++) {
-        var srv = wAkSources[targetServers[si]];
-        if (srv && srv[wLang2]) { wAkData = srv[wLang2]; wServerName = targetServers[si]; break; }
+      var wAkData = null, wServerName2 = "";
+      var wServers2 = ["neko", "koto"];
+      for (var si2 = 0; si2 < wServers2.length; si2++) {
+        var srvData = await scrapeVaromine(wAnilistId2, wEpisode2, wLang2, wServers2[si2]);
+        if (srvData) { wAkData = srvData; wServerName2 = wServers2[si2]; break; }
       }
       if (!wAkData) return new Response(wLang2.toUpperCase() + " not available for ep " + wEpisode2, { status: 404, headers: corsHeaders });
-      var AK_HDRS2 = encodeURIComponent(JSON.stringify(VIDNEST_HEADERS));
-      var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wAkData.m3u8) + "&headers=" + AK_HDRS2, tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS2 }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2 };
+      var wAnilistInfo2 = await fetchAnilistInfo(wAnilistId2);
+      var wTitle2 = wAnilistInfo2.title;
+      var akReferer2 = "https://vivibebe.site/";
+      if (wAkData.embedUrl && wAkData.embedUrl.includes("megaplay")) akReferer2 = "https://megaplay.buzz/";
+      else if (wAkData.embedUrl && wAkData.embedUrl.includes("vidtube")) akReferer2 = "https://vidtube.site/";
+      else if (wAkData.embedUrl && wAkData.embedUrl.includes("vidwish")) akReferer2 = "https://vidwish.live/";
+      var AK_HDRS2 = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": akReferer2 }));
+      var wCfg2 = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wAkData.m3u8) + "&headers=" + AK_HDRS2, tracks: (wAkData.tracks || []).map(function(t) { return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + AK_HDRS2 }); }), intro: wAkData.intro || null, outro: wAkData.outro || null, title: wTitle2 + " - Ep " + wEpisode2, embedUrl: wAkData.embedUrl || "" };
       var wPage2 = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg2) + ";</script></head>");
       return new Response(wPage2, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
@@ -1925,35 +1777,22 @@ async function handleRequest(request) {
       var avAnilistId = Number(availMatch[1]);
       var avEpisode = Number(availMatch[2]);
 
-      var avResults = {
-        neko: { sub: false, dub: false },
-        koto: { sub: false, dub: false },
-        megaplay: { sub: false, dub: false }
-      };
-
-      var [avNekoSub, avNekoDub, avKotoSub, avKotoDub] = await Promise.allSettled([
-        scrapeVaromine(avAnilistId, avEpisode, "sub", "neko").then(function(d) { return !!d; }),
-        scrapeVaromine(avAnilistId, avEpisode, "dub", "neko").then(function(d) { return !!d; }),
-        scrapeVaromine(avAnilistId, avEpisode, "sub", "koto").then(function(d) { return !!d; }),
-        scrapeVaromine(avAnilistId, avEpisode, "dub", "koto").then(function(d) { return !!d; })
-      ]);
-
-      if (avNekoSub.status === "fulfilled") avResults.neko.sub = avNekoSub.value;
-      if (avNekoDub.status === "fulfilled") avResults.neko.dub = avNekoDub.value;
-      if (avKotoSub.status === "fulfilled") avResults.koto.sub = avKotoSub.value;
-      if (avKotoDub.status === "fulfilled") avResults.koto.dub = avKotoDub.value;
-
-      var avNeedFallback = !avResults.neko.sub && !avResults.neko.dub && !avResults.koto.sub && !avResults.koto.dub;
-      if (avNeedFallback) {
-        var avCacheKey = "ak-" + avAnilistId + "-" + avEpisode;
-        var avSources = getScrapeCache(avCacheKey) || await scrapeAnikage(avAnilistId, avEpisode);
-        if (avSources.neko) {
-          if (avSources.neko.sub) avResults.neko.sub = true;
-          if (avSources.neko.dub) avResults.neko.dub = true;
+      var avServers = ["neko", "koto", "miko", "dib", "wave", "senshi"];
+      var avLangs = ["sub", "dub"];
+      var avPromises = [];
+      var avKeys = [];
+      for (var avi = 0; avi < avServers.length; avi++) {
+        for (var avj = 0; avj < avLangs.length; avj++) {
+          avPromises.push(scrapeVaromine(avAnilistId, avEpisode, avLangs[avj], avServers[avi]).then(function(d) { return !!d; }).catch(function() { return false; }));
+          avKeys.push({ server: avServers[avi], lang: avLangs[avj] });
         }
-        if (avSources.koto) {
-          if (avSources.koto.sub) avResults.koto.sub = true;
-          if (avSources.koto.dub) avResults.koto.dub = true;
+      }
+
+      var avResults = { neko: { sub: false, dub: false }, koto: { sub: false, dub: false }, miko: { sub: false, dub: false }, dib: { sub: false, dub: false }, wave: { sub: false, dub: false }, senshi: { sub: false, dub: false }, megaplay: { sub: false, dub: false } };
+      var avSettled = await Promise.allSettled(avPromises);
+      for (var avk = 0; avk < avSettled.length; avk++) {
+        if (avSettled[avk].status === "fulfilled" && avSettled[avk].value) {
+          avResults[avKeys[avk].server][avKeys[avk].lang] = true;
         }
       }
 
@@ -1975,7 +1814,19 @@ async function handleRequest(request) {
       var emAnilistId = Number(embedsMatch[1]);
       var emEpisode = Number(embedsMatch[2]);
       var emLang = embedsMatch[3];
-      var emResults = await scrapeAnikageEmbeds(emAnilistId, emEpisode, emLang);
+      var emProviders = ["neko", "koto"];
+      var emResults = { neko: null, koto: null };
+      var emPromises = emProviders.map(function(p) {
+        return scrapeVaromine(emAnilistId, emEpisode, emLang, p).then(function(d) {
+          return d ? { server: p, m3u8: d.m3u8, embedUrl: d.embedUrl, allEmbeds: d.allEmbeds } : null;
+        }).catch(function() { return null; });
+      });
+      var emSettled = await Promise.allSettled(emPromises);
+      for (var emi = 0; emi < emSettled.length; emi++) {
+        if (emSettled[emi].status === "fulfilled" && emSettled[emi].value) {
+          emResults[emSettled[emi].value.server] = emSettled[emi].value;
+        }
+      }
       return new Response(JSON.stringify(emResults), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
@@ -2017,8 +1868,8 @@ async function handleRequest(request) {
       var dlEpisode = Number(dlMatch[2]);
 
       var dlAnilistPromise = fetchAnilistInfo(dlAnilistId);
-      var dlInfoPromise = fetch(VAROMINE_API + "/api/info?slug=" + dlAnilistId).then(function(r) { return r.json(); }).catch(function() { return null; });
-      var dlEpsPromise = fetch(VAROMINE_API + "/api/episodes?slug=" + dlAnilistId).then(function(r) { return r.json(); }).catch(function() { return null; });
+      var dlInfoPromise = fetch(ANIKAGE_API_BASE + "/" + dlAnilistId, { headers: ANIKAGE_HEADERS }).then(function(r) { return r.json(); }).catch(function() { return null; });
+      var dlEpsPromise = fetch(ANIKAGE_API_BASE + "/" + dlAnilistId + "/episodes", { headers: ANIKAGE_HEADERS }).then(function(r) { return r.json(); }).catch(function() { return null; });
 
       var [dlAnilistInfo, dlInfoRes, dlEpsRes] = await Promise.all([dlAnilistPromise, dlInfoPromise, dlEpsPromise]);
 
@@ -2026,20 +1877,21 @@ async function handleRequest(request) {
       var dlCover = "";
       var dlMalId = dlAnilistInfo.malId || null;
 
-      var dlInfo = dlInfoRes && dlInfoRes.data ? dlInfoRes.data : {};
-      if (!dlTitle && dlInfo.title) dlTitle = dlInfo.title.english || dlInfo.title.romaji || dlInfo.title.userPreferred || "";
-      if (dlInfo.coverImage) dlCover = dlInfo.coverImage.extraLarge || dlInfo.coverImage.large || dlInfo.coverImage.medium || "";
+      var dlInfo = dlInfoRes && dlInfoRes.anime ? dlInfoRes.anime : (dlInfoRes && dlInfoRes.data ? dlInfoRes.data : {});
+      if (!dlTitle && dlInfo.title) dlTitle = dlInfo.title.english || dlInfo.title.romaji || dlInfo.title.userPreferred || dlInfo.title || "";
+      if (dlInfo.coverImage) dlCover = dlInfo.coverImage.extraLarge || dlInfo.coverImage.large || dlInfo.coverImage.medium || dlInfo.coverImage || "";
+      if (!dlCover && dlInfo.images && dlInfo.images.jpg) dlCover = dlInfo.images.jpg.large_image_url || dlInfo.images.jpg.image_url || "";
 
       var dlDlData = dlMalId ? await getDownloadLinksCached(dlMalId, dlEpisode) : null;
 
-      var dlEpList = dlEpsRes && dlEpsRes.data ? (Array.isArray(dlEpsRes.data) ? dlEpsRes.data : []) : [];
-      var dlTotalEps = dlInfo.totalEpisodes || dlEpList.length || 24;
+      var dlEpList = dlEpsRes && Array.isArray(dlEpsRes) ? dlEpsRes : (dlEpsRes && dlEpsRes.data ? (Array.isArray(dlEpsRes.data) ? dlEpsRes.data : []) : []);
+      var dlTotalEps = dlInfo.totalEpisodes || dlInfo.total_episodes || dlEpList.length || 24;
       var dlGenres = dlInfo.genres || [];
-      var dlRating = dlInfo.rating || "";
+      var dlRating = dlInfo.rating || dlInfo.score || "";
       var dlSubLinks = dlDlData && dlDlData.sub ? dlDlData.sub : [];
       var dlDubLinks = dlDlData && dlDlData.dub ? dlDlData.dub : [];
 
-      var dlCurrentEp = dlInfo.currentEpisode || dlEpList.length || dlEpisode;
+      var dlCurrentEp = dlInfo.currentEpisode || dlInfo.total_episodes || dlEpList.length || dlEpisode;
       var dlAiredEps = Math.max(dlCurrentEp, dlEpisode);
       if (dlTotalEps > 0 && dlAiredEps > dlTotalEps) dlAiredEps = dlTotalEps;
 
