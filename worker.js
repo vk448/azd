@@ -223,12 +223,12 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
   var provider = serverName && validServers.indexOf(serverName) > -1 ? serverName : "neko";
   var apiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + (lang || "sub");
 
-  for (var attempt = 0; attempt < 2; attempt++) {
+  for (var attempt = 0; attempt < 3; attempt++) {
     try {
-      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(12000) });
-      if (!r.ok) { if (attempt === 0) continue; return null; }
+      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { if (attempt < 2) continue; return null; }
       var data = await r.json();
-      if (!data || !data.embeds || data.embeds.length === 0) { if (attempt === 0) continue; return null; }
+      if (!data || !data.embeds || data.embeds.length === 0) { if (attempt < 2) continue; return null; }
 
     var embeds = data.embeds || [];
     var subtitles = data.subtitles || [];
@@ -252,7 +252,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
       }
     }
 
-    if (!m3u8Url) { if (attempt === 0) continue; return null; }
+    if (!m3u8Url) { if (attempt < 2) continue; return null; }
 
     var tracks = [];
     for (var si = 0; si < sources.length; si++) {
@@ -293,7 +293,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
     cacheScrape(cacheKey, result);
     return result;
     } catch (e) {
-      if (attempt === 0) continue; return null;
+      if (attempt < 2) continue; return null;
     }
   }
   return null;
