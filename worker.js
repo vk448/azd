@@ -230,6 +230,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
 
     var embeds = data.embeds || [];
     var subtitles = data.subtitles || [];
+    var sources = data.sources || [];
     var m3u8Url = null;
     var usedEmbed = null;
 
@@ -251,9 +252,29 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
 
     if (!m3u8Url) return null;
 
-    var tracks = subtitles.map(function(sub) {
-      return { file: sub.file || "", label: sub.label || "Unknown", kind: sub.kind || "captions", default: sub.default || false };
-    });
+    var tracks = [];
+    for (var si = 0; si < sources.length; si++) {
+      var src = sources[si];
+      if (src.type === "softsub" && src.embedUrl) {
+        try {
+          var subMatch = src.embedUrl.match(/[?&]sub=([^&]+)/);
+          if (subMatch) {
+            var subUrl = decodeURIComponent(subMatch[1]);
+            if (subUrl && subUrl.startsWith("http")) {
+              tracks.push({ file: subUrl, label: subtitles[0] && subtitles[0].label || "English", kind: "captions", default: true });
+            }
+          }
+        } catch (e) {}
+      }
+    }
+    if (tracks.length === 0) {
+      for (var ti = 0; ti < subtitles.length; ti++) {
+        var sub = subtitles[ti];
+        if (sub.file && sub.file.startsWith("http")) {
+          tracks.push({ file: sub.file, label: sub.label || "Unknown", kind: sub.kind || "captions", default: sub.default || false });
+        }
+      }
+    }
 
     var result = {
       m3u8: m3u8Url,
