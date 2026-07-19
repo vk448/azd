@@ -255,12 +255,12 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
     var tracks = [];
     for (var si = 0; si < sources.length; si++) {
       var src = sources[si];
-      if (src.type === "softsub" && src.embedUrl) {
+      if (src.embedUrl) {
         try {
           var subMatch = src.embedUrl.match(/[?&]sub=([^&]+)/);
           if (subMatch) {
             var subUrl = decodeURIComponent(subMatch[1]);
-            if (subUrl && subUrl.startsWith("http")) {
+            if (subUrl && subUrl.startsWith("http") && !tracks.some(function(t) { return t.file === subUrl; })) {
               tracks.push({ file: subUrl, label: subtitles[0] && subtitles[0].label || "English", kind: "captions", default: true });
             }
           }
