@@ -1343,7 +1343,8 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
   function parseVTT(text){
     var cues=[];
-    var lines=text.replace(/\r\n/g,'\n').split('\n');
+    var CR=String.fromCharCode(13);var LF=String.fromCharCode(10);var CRLF=CR+LF;
+    var lines=text.split(CRLF).join(LF).split(LF);
     var i=0;
     while(i<lines.length&&lines[i].trim()!=='')i++;
     while(i<lines.length){
@@ -1351,13 +1352,14 @@ const PLAYER_HTML = `<!DOCTYPE html>
       if(i>=lines.length)break;
       var timeLine=lines[i];i++;
       if(!timeLine||timeLine.indexOf('-->')===-1)continue;
-      var tm=timeLine.match(/(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})/);
-      if(!tm){tm=timeLine.match(/(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{2}):(\\d{2})\\.(\\d{3})/);if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
+      var ts='(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})';
+      var tm=timeLine.match(new RegExp(ts));
+      if(!tm){var ts2='(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{2}):(\\d{2})\\.(\\d{3})';tm=timeLine.match(new RegExp(ts2));if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
       var start=parseInt(tm[1])*3600+parseInt(tm[2])*60+parseInt(tm[3])+parseInt(tm[4])/1000;
       var end=parseInt(tm[5])*3600+parseInt(tm[6])*60+parseInt(tm[7])+parseInt(tm[8])/1000;
       var txt='';
       while(i<lines.length&&lines[i].trim()!==''){
-        if(txt)txt+='\n';
+        if(txt)txt+=LF;
         txt+=lines[i].replace(/<[^>]+>/g,'').trim();
         i++;
       }
