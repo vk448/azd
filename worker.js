@@ -223,12 +223,12 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
   var provider = serverName && validServers.indexOf(serverName) > -1 ? serverName : "neko";
   var apiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + (lang || "sub");
 
-  for (var attempt = 0; attempt < 3; attempt++) {
+  for (var attempt = 0; attempt < 2; attempt++) {
     try {
-      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(10000) });
-      if (!r.ok) { if (attempt < 2) continue; return null; }
+      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) { if (attempt < 1) continue; return null; }
       var data = await r.json();
-      if (!data || !data.embeds || data.embeds.length === 0) { if (attempt < 2) continue; return null; }
+      if (!data || !data.embeds || data.embeds.length === 0) { if (attempt < 1) continue; return null; }
 
     var embeds = data.embeds || [];
     var subtitles = data.subtitles || [];
@@ -252,7 +252,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
       }
     }
 
-    if (!m3u8Url) { if (attempt < 2) continue; return null; }
+    if (!m3u8Url) { if (attempt < 1) continue; return null; }
 
     var tracks = [];
     for (var si = 0; si < sources.length; si++) {
@@ -327,7 +327,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
     cacheScrape(cacheKey, result);
     return result;
     } catch (e) {
-      if (attempt < 2) continue; return null;
+      if (attempt < 1) continue; return null;
     }
   }
   return null;
@@ -340,7 +340,7 @@ async function scrapeM3u8FromEmbed(embedUrl) {
     var origin = new URL(embedUrl).origin;
     var r = await fetch(embedUrl, {
       headers: { "User-Agent": UA, "Referer": origin + "/" },
-      signal: AbortSignal.timeout(12000)
+      signal: AbortSignal.timeout(8000)
     });
     if (!r.ok) return null;
     var html = await r.text();
@@ -1064,19 +1064,6 @@ const PLAYER_HTML = `<!DOCTYPE html>
         <p class="kicker">AnimeZilla</p>
         <h1 id="videoTitle">Player</h1>
       </div>
-      <div style="display:flex; gap:8px;">
-        <div class="menu-wrap">
-          <button class="icon-btn" id="ccBtn" aria-label="Subtitles">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10.5h3M7 13.5h2M14 10.5h3M14 13.5h2.5" stroke-linecap="round"/></svg>
-          </button>
-          <div class="menu" id="ccMenu">
-            <div class="menu-section">
-              <div class="menu-heading">Subtitles</div>
-              <div class="menu-item selected" data-cc="-1">Off <span class="check">&#10003;</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div class="skip-pill" id="skipIntro">
@@ -1127,6 +1114,18 @@ const PLAYER_HTML = `<!DOCTYPE html>
         </div>
 
         <div class="controls-right">
+          <div class="menu-wrap">
+            <button class="flat-btn" id="ccBtn" aria-label="Subtitles">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10.5h3M7 13.5h2M14 10.5h3M14 13.5h2.5" stroke-linecap="round"/></svg>
+            </button>
+            <div class="menu" id="ccMenu">
+              <div class="menu-section">
+                <div class="menu-heading">Subtitles</div>
+                <div class="menu-item selected" data-cc="-1">Off <span class="check">&#10003;</span></div>
+              </div>
+            </div>
+          </div>
+
           <div class="menu-wrap">
             <button class="flat-btn" id="speedBtn" aria-label="Playback speed">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="13" r="8"/><path d="M12 13l3-3M9 4h6" stroke-linecap="round"/></svg>
@@ -1863,16 +1862,37 @@ async function handleRequest(request) {
         var wData = null;
         var usedServer = serverName;
 
-        // Try requested provider first
-        wData = await scrapeVaromine(aniId, ep, lang, serverName);
-
-        // If failed, try all other providers
-        if (!wData) {
-          for (var pi = 0; pi < allProviders.length; pi++) {
-            if (allProviders[pi] === serverName) continue;
-            wData = await scrapeVaromine(aniId, ep, lang, allProviders[pi]);
-            if (wData) { usedServer = allProviders[pi]; break; }
-          }
+        // Fire requested provider + all others in parallel, take first success
+        var providerPromises = allProviders.map(function(p) {
+          return scrapeVaromine(aniId, ep, lang, p).then(function(d) { return { server: p, data: d }; });
+        });
+        // Also fire the requested one first for priority
+        var firstResult = await scrapeVaromine(aniId, ep, lang, serverName);
+        if (firstResult) {
+          wData = firstResult;
+          usedServer = serverName;
+        } else {
+          // Race remaining providers
+          var remaining = allProviders.filter(function(p) { return p !== serverName; });
+          var remainingPromises = remaining.map(function(p) {
+            return scrapeVaromine(aniId, ep, lang, p).then(function(d) { return { server: p, data: d }; });
+          });
+          // Use Promise.any-like: settle first non-null
+          var result = await new Promise(function(resolve) {
+            var settled = 0;
+            var total = remainingPromises.length;
+            if (total === 0) { resolve(null); return; }
+            remainingPromises.forEach(function(pr) {
+              pr.then(function(r) {
+                if (!wData && r.data) { wData = r.data; usedServer = r.server; resolve(r); }
+                settled++;
+                if (settled >= total) resolve(null);
+              }).catch(function() {
+                settled++;
+                if (settled >= total) resolve(null);
+              });
+            });
+          });
         }
 
         if (!wData) {
