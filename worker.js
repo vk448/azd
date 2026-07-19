@@ -1053,9 +1053,6 @@ const PLAYER_HTML = `<!DOCTYPE html>
     <div class="player" id="player" tabindex="0">
     <video id="video" playsinline preload="metadata"></video>
 
-    <div class="scrim-top"></div>
-    <div class="scrim-bottom"></div>
-
     <div class="spinner" id="spinner"></div>
 
     <div class="top-bar" id="topBar">
