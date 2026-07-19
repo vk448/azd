@@ -885,7 +885,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .center-play svg{ width:30px; height:30px; fill:#fff; margin-left:4px; }
   .center-play.hidden{ opacity:0; pointer-events:none; }
 
-  .skip-btn{position:absolute;bottom:92px;left:50%;transform:translateX(-50%);background:rgba(255,30,60,0.85);border:1px solid rgba(255,107,53,0.6);color:#fff;border-radius:8px;padding:10px 28px;font:bold 13px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
+  .skip-btn{position:absolute;bottom:92px;right:22px;background:rgba(255,30,60,0.85);border:1px solid rgba(255,107,53,0.6);color:#fff;border-radius:8px;padding:10px 28px;font:bold 13px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
   .skip-btn:hover{background:rgba(255,30,60,0.45);box-shadow:0 0 16px var(--red-glow-soft)}
   .skip-btn.show{display:block}
 
