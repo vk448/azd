@@ -219,14 +219,16 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
   var cached = getScrapeCache(cacheKey);
   if (cached) return cached;
 
-  try {
-    var validServers = ["neko", "koto", "miko", "dib", "wave", "senshi"];
-    var provider = serverName && validServers.indexOf(serverName) > -1 ? serverName : "neko";
-    var apiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + (lang || "sub");
-    var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return null;
-    var data = await r.json();
-    if (!data || !data.embeds || data.embeds.length === 0) return null;
+  var validServers = ["neko", "koto", "miko", "dib", "wave", "senshi"];
+  var provider = serverName && validServers.indexOf(serverName) > -1 ? serverName : "neko";
+  var apiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + (lang || "sub");
+
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(12000) });
+      if (!r.ok) { if (attempt === 0) continue; return null; }
+      var data = await r.json();
+      if (!data || !data.embeds || data.embeds.length === 0) { if (attempt === 0) continue; return null; }
 
     var embeds = data.embeds || [];
     var subtitles = data.subtitles || [];
@@ -250,7 +252,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
       }
     }
 
-    if (!m3u8Url) return null;
+    if (!m3u8Url) { if (attempt === 0) continue; return null; }
 
     var tracks = [];
     for (var si = 0; si < sources.length; si++) {
@@ -290,9 +292,11 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
 
     cacheScrape(cacheKey, result);
     return result;
-  } catch (e) {
-    return null;
+    } catch (e) {
+      if (attempt === 0) continue; return null;
+    }
   }
+  return null;
 }
 
 const scrapeVaromine = scrapeEmbeds;
@@ -302,7 +306,7 @@ async function scrapeM3u8FromEmbed(embedUrl) {
     var origin = new URL(embedUrl).origin;
     var r = await fetch(embedUrl, {
       headers: { "User-Agent": UA, "Referer": origin + "/" },
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(12000)
     });
     if (!r.ok) return null;
     var html = await r.text();
@@ -1298,15 +1302,17 @@ const PLAYER_HTML = `<!DOCTYPE html>
     var tracks=cfg.tracks||[];
     var subTracks=tracks.filter(function(t){return t.kind==="captions"||t.kind==="subtitles"});
     subTracks.forEach(function(trk,i){
-      var el=document.createElement("track");el.kind=trk.kind;el.src=trk.file;el.label=trk.label||"Sub "+(i+1);el.srclang=trk.label?trk.label.substring(0,2).toLowerCase():"en";if(trk.default)el.default=true;video.appendChild(el);
+      var el=document.createElement("track");el.kind=trk.kind;el.src=trk.file;el.label=trk.label||"Sub "+(i+1);el.srclang=trk.label?trk.label.substring(0,2).toLowerCase():"en";video.appendChild(el);
     });
-    subOptions.innerHTML='<div class="option-row selected" data-sub="-1"><span>Off</span><span class="dot"></span></div>';
+    var defaultIdx=subTracks.length>0?0:-1;
+    subOptions.innerHTML='<div class="option-row" data-sub="-1"><span>Off</span><span class="dot"></span></div>';
     subTracks.forEach(function(trk,i){
-      var row=document.createElement("div");row.className="option-row";row.setAttribute("data-sub",String(i));
+      var row=document.createElement("div");row.className="option-row"+(i===defaultIdx?" selected":"");row.setAttribute("data-sub",String(i));
       row.innerHTML='<span>'+((trk.label||"Sub "+(i+1)).replace(/</g,"&lt;"))+'</span><span class="dot"></span>';
       subOptions.appendChild(row);
     });
-    if(subTracks.length>0){subVal.textContent=subTracks.length+" Track"+(subTracks.length>1?"s":"")}
+    if(defaultIdx>=0&&video.textTracks.length>0){video.textTracks[0].mode="showing";subVal.textContent=subTracks[0].label||"On"}
+    else if(subTracks.length>0){subVal.textContent=subTracks.length+" Track"+(subTracks.length>1?"s":"")}
     subOptions.querySelectorAll(".option-row").forEach(function(row){
       row.addEventListener("click",function(){
         var idx=parseInt(row.getAttribute("data-sub"),10);
