@@ -1345,27 +1345,23 @@ const PLAYER_HTML = `<!DOCTYPE html>
     var cues=[];
     var lines=text.replace(/\r\n/g,'\n').split('\n');
     var i=0;
-    // skip header
     while(i<lines.length&&lines[i].trim()!=='')i++;
     while(i<lines.length){
-      // skip blank lines
       while(i<lines.length&&lines[i].trim()==='')i++;
       if(i>=lines.length)break;
-      // time line
       var timeLine=lines[i];i++;
-      if(!timeLine||!timeLine.match('-->'))continue;
-      var tm=timeLine.match(/(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})/);
-      if(!tm){tm=timeLine.match(/(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2})\.(\d{3})/);if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
+      if(!timeLine||timeLine.indexOf('-->')===-1)continue;
+      var tm=timeLine.match(/(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})/);
+      if(!tm){tm=timeLine.match(/(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{2}):(\\d{2})\\.(\\d{3})/);if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
       var start=parseInt(tm[1])*3600+parseInt(tm[2])*60+parseInt(tm[3])+parseInt(tm[4])/1000;
       var end=parseInt(tm[5])*3600+parseInt(tm[6])*60+parseInt(tm[7])+parseInt(tm[8])/1000;
-      // text lines until blank
-      var text='';
+      var txt='';
       while(i<lines.length&&lines[i].trim()!==''){
-        if(text)text+='\n';
-        text+=lines[i].replace(/<[^>]+>/g,'').trim();
+        if(txt)txt+='\n';
+        txt+=lines[i].replace(/<[^>]+>/g,'').trim();
         i++;
       }
-      if(text)cues.push({start:start,end:end,text:text});
+      if(txt)cues.push({start:start,end:end,text:txt});
     }
     return cues;
   }
