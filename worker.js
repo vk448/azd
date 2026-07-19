@@ -223,7 +223,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
     var validServers = ["neko", "koto", "miko", "dib", "wave", "senshi"];
     var provider = serverName && validServers.indexOf(serverName) > -1 ? serverName : "neko";
     var apiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=" + (lang || "sub");
-    var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS });
+    var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     var data = await r.json();
     if (!data || !data.embeds || data.embeds.length === 0) return null;
@@ -280,7 +280,8 @@ async function scrapeM3u8FromEmbed(embedUrl) {
   try {
     var origin = new URL(embedUrl).origin;
     var r = await fetch(embedUrl, {
-      headers: { "User-Agent": UA, "Referer": origin + "/" }
+      headers: { "User-Agent": UA, "Referer": origin + "/" },
+      signal: AbortSignal.timeout(10000)
     });
     if (!r.ok) return null;
     var html = await r.text();
@@ -303,7 +304,8 @@ async function scrapeM3u8FromEmbed(embedUrl) {
     if (dataIdMatch) {
       var srcUrl2 = origin + "/stream/getSources?id=" + dataIdMatch[1];
       var r2 = await fetch(srcUrl2, {
-        headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" }
+        headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
+        signal: AbortSignal.timeout(8000)
       });
       if (r2.ok) {
         var srcData = await r2.json();
@@ -1398,6 +1400,16 @@ const PLAYER_HTML = `<!DOCTYPE html>
     if(e.key==='f'||e.key==='F'){fullBtn.click()}
     if(e.key==='m'||e.key==='M'){muteBtn.click()}
   });
+
+  var hideTimer=null;
+  function showControls(){videoArea.classList.remove('hide-cursor');clearTimeout(hideTimer);hideTimer=setTimeout(function(){if(!video.paused){videoArea.classList.add('hide-cursor')}},3000)}
+  videoArea.addEventListener('mousemove',showControls);
+  videoArea.addEventListener('mousedown',showControls);
+  videoArea.addEventListener('touchstart',showControls);
+  videoArea.addEventListener('mouseenter',showControls);
+  video.addEventListener('pause',function(){videoArea.classList.remove('hide-cursor');clearTimeout(hideTimer)});
+  video.addEventListener('play',function(){hideTimer=setTimeout(function(){videoArea.classList.add('hide-cursor')},3000)});
+  showControls();
 
   if(src&&src.length>0){
     if(src.includes('.m3u8')){
