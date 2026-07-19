@@ -225,7 +225,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
 
   for (var attempt = 0; attempt < 3; attempt++) {
     try {
-      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(15000) });
+      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(10000) });
       if (!r.ok) { if (attempt < 2) continue; return null; }
       var data = await r.json();
       if (!data || !data.embeds || data.embeds.length === 0) { if (attempt < 2) continue; return null; }
@@ -276,6 +276,40 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
           tracks.push({ file: sub.file, label: sub.label || "Unknown", kind: sub.kind || "captions", default: sub.default || false });
         }
       }
+    }
+
+    // Merge SUB subtitles into DUB
+    if (lang === "dub" && tracks.length <= 1) {
+      try {
+        var subCacheKey = "se-" + anilistId + "-" + episode + "-sub-" + (serverName || "default");
+        var subCached = getScrapeCache(subCacheKey);
+        var subTracksToAdd = [];
+        if (subCached && subCached.tracks) {
+          subTracksToAdd = subCached.tracks;
+        } else {
+          var subApiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=sub";
+          var subR = await fetch(subApiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(8000) });
+          if (subR.ok) {
+            var subData = await subR.json();
+            if (subData && subData.sources) {
+              for (var sti = 0; sti < subData.sources.length; sti++) {
+                if (subData.sources[sti].embedUrl) {
+                  var sm = subData.sources[sti].embedUrl.match(/[?&]sub=([^&]+)/);
+                  if (sm) {
+                    var su = decodeURIComponent(sm[1]);
+                    if (su && su.startsWith("http")) subTracksToAdd.push({ file: su, label: (subData.subtitles && subData.subtitles[0] && subData.subtitles[0].label) || "English", kind: "captions", default: false });
+                  }
+                }
+              }
+            }
+          }
+        }
+        for (var mti = 0; mti < subTracksToAdd.length; mti++) {
+          if (!tracks.some(function(t) { return t.file === subTracksToAdd[mti].file; })) {
+            tracks.push(Object.assign({}, subTracksToAdd[mti], { default: false }));
+          }
+        }
+      } catch (e) {}
     }
 
     var result = {
@@ -851,7 +885,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .center-play svg{ width:30px; height:30px; fill:#fff; margin-left:4px; }
   .center-play.hidden{ opacity:0; pointer-events:none; }
 
-  .skip-btn{position:absolute;top:18px;right:22px;background:rgba(255,30,60,0.2);border:1px solid rgba(255,30,60,0.35);color:#ffe6e8;border-radius:8px;padding:8px 18px;font:bold 12px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
+  .skip-btn{position:absolute;bottom:92px;left:50%;transform:translateX(-50%);background:rgba(255,30,60,0.85);border:1px solid rgba(255,107,53,0.6);color:#fff;border-radius:8px;padding:10px 28px;font:bold 13px 'Segoe UI',sans-serif;cursor:pointer;z-index:10;display:none;text-transform:uppercase;letter-spacing:1.5px;transition:background .15s,box-shadow .15s;backdrop-filter:blur(4px)}
   .skip-btn:hover{background:rgba(255,30,60,0.45);box-shadow:0 0 16px var(--red-glow-soft)}
   .skip-btn.show{display:block}
 
@@ -909,7 +943,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   }
 
   .video-area.hide-cursor{cursor:none}
-  .video-area.hide-cursor .controls,.video-area.hide-cursor .brand-mini,.video-area.hide-cursor .skip-btn{opacity:0;pointer-events:none}
+  .video-area.hide-cursor .controls,.video-area.hide-cursor .brand-mini{opacity:0;pointer-events:none}
 
   .seek-row{
     display:flex; align-items:center; gap:10px;
@@ -1898,16 +1932,24 @@ async function handleRequest(request) {
       return async function() {
         var wAnilistInfo = await fetchAnilistInfo(aniId);
         var wTitle = wAnilistInfo.title;
-        var wData = await scrapeVaromine(aniId, ep, lang, serverName);
+        var allProviders = ["neko", "koto", "miko", "dib", "wave", "senshi"];
+        var wData = null;
+        var usedServer = serverName;
 
+        // Try requested provider first
+        wData = await scrapeVaromine(aniId, ep, lang, serverName);
+
+        // If failed, try all other providers
         if (!wData) {
-          var fallbackServer = serverName === "neko" ? "koto" : serverName === "koto" ? "neko" : "";
-          if (fallbackServer) wData = await scrapeVaromine(aniId, ep, lang, fallbackServer);
-          if (wData) serverName = fallbackServer;
+          for (var pi = 0; pi < allProviders.length; pi++) {
+            if (allProviders[pi] === serverName) continue;
+            wData = await scrapeVaromine(aniId, ep, lang, allProviders[pi]);
+            if (wData) { usedServer = allProviders[pi]; break; }
+          }
         }
 
         if (!wData) {
-          var notAvailPage = '<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,#1a0505 0%,#060202 70%);font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;color:#ffe6e8;display:flex;align-items:center;justify-content:center;overflow:hidden}.box{text-align:center;padding:40px;border:1px solid rgba(255,30,60,0.3);border-radius:16px;background:rgba(255,30,60,0.05);backdrop-filter:blur(10px);max-width:400px}.icon{width:60px;height:60px;margin:0 auto 20px;border-radius:50%;background:linear-gradient(135deg,#ff6b35,#f72585);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(255,30,60,0.3)}.icon svg{width:28px;height:28px;fill:#fff}h2{font-size:18px;margin-bottom:8px;color:#ff6b35}p{font-size:13px;color:rgba(255,230,232,0.5);line-height:1.5}.tag{display:inline-block;margin-top:16px;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:1px;background:rgba(255,107,53,0.15);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)}</style></head><body><div class="box"><div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div><h2>Not Available</h2><p>' + lang.toUpperCase() + ' stream not available on<br><strong>' + serverName.toUpperCase() + '</strong> for Episode ' + ep + '</p><div class="tag">TRY ANOTHER SERVER</div></div></body></html>';
+          var notAvailPage = '<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,#1a0505 0%,#060202 70%);font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;color:#ffe6e8;display:flex;align-items:center;justify-content:center;overflow:hidden}.box{text-align:center;padding:40px;border:1px solid rgba(255,30,60,0.3);border-radius:16px;background:rgba(255,30,60,0.05);backdrop-filter:blur(10px);max-width:400px}.icon{width:60px;height:60px;margin:0 auto 20px;border-radius:50%;background:linear-gradient(135deg,#ff6b35,#f72585);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(255,30,60,0.3)}.icon svg{width:28px;height:28px;fill:#fff}h2{font-size:18px;margin-bottom:8px;color:#ff6b35}p{font-size:13px;color:rgba(255,230,232,0.5);line-height:1.5}.tag{display:inline-block;margin-top:16px;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:1px;background:rgba(255,107,53,0.15);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)}</style></head><body><div class="box"><div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div><h2>Not Available</h2><p>' + lang.toUpperCase() + ' stream not available for Episode ' + ep + '</p><div class="tag">TRY MEGAPLAY SERVER</div></div></body></html>';
           return new Response(notAvailPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
         }
         var streamReferer = "https://vivibebe.site/";
