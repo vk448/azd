@@ -1040,6 +1040,24 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .hide{ opacity:0; pointer-events:none; }
   .player.hide-cursor{ cursor:none; }
 
+  .subtitle-overlay{
+    position:absolute; left:0; right:0; bottom:104px;
+    display:flex; justify-content:center; z-index:5;
+    pointer-events:none; padding:0 24px;
+    transition: bottom .3s ease;
+  }
+  .subtitle-overlay.controls-hidden{ bottom:20px; }
+  .subtitle-overlay .cue{
+    background:rgba(6,6,8,0.78);
+    backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);
+    color:#fff; font-size:15px; font-weight:500;
+    line-height:1.4; padding:5px 14px; border-radius:6px;
+    text-align:center; max-width:80%;
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  .subtitle-overlay .cue:empty{ display:none; }
+
   @media (max-width:560px){
     .transport-btn.seek{ width:40px; height:40px; }
     .transport-btn.play{ width:56px; height:56px; }
@@ -1052,6 +1070,8 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
     <div class="player" id="player" tabindex="0">
     <video id="video" playsinline preload="metadata"></video>
+
+    <div class="subtitle-overlay" id="subtitleOverlay"><div class="cue" id="subtitleCue"></div></div>
 
     <div class="spinner" id="spinner"></div>
 
@@ -1243,6 +1263,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
     knob.style.left=pct+'%';
     curTime.textContent=fmt(video.currentTime);
     fullTime.textContent=fmt(video.currentTime)+' / '+fmt(video.duration);
+    renderSubtitle();
     checkSkip();
   });
   video.addEventListener('loadedmetadata',function(){
@@ -1313,32 +1334,107 @@ const PLAYER_HTML = `<!DOCTYPE html>
     });
   });
 
-  var defaultIdx=cfg.tracks&&cfg.tracks.length>0?0:-1;
-  var subTracks=(cfg.tracks||[]).filter(function(t){return t.kind==="captions"||t.kind==="subtitles"});
-  subTracks.forEach(function(trk,i){
-    var el=document.createElement("track");
-    el.kind=trk.kind;el.src=trk.file;el.label=trk.label||"Sub "+(i+1);
-    el.srclang=trk.label?trk.label.substring(0,2).toLowerCase():"en";
-    video.appendChild(el);
-  });
-  ccMenu.querySelector('.menu-section').innerHTML='<div class="menu-heading">Subtitles</div><div class="menu-item'+(defaultIdx===-1?' selected':'')+'" data-cc="-1">Off <span class="check">&#10003;</span></div>';
-  subTracks.forEach(function(trk,i){
-    var div=document.createElement("div");
-    div.className="menu-item"+(i===defaultIdx?" selected":"");
-    div.setAttribute("data-cc",String(i));
-    div.innerHTML=(trk.label||"Sub "+(i+1)).replace(/</g,"&lt;")+' <span class="check">&#10003;</span>';
-    ccMenu.querySelector('.menu-section').appendChild(div);
-  });
-  if(defaultIdx>=0&&video.textTracks.length>0){video.textTracks[0].mode="showing"}
-  ccMenu.querySelectorAll('.menu-item').forEach(function(item){
-    item.addEventListener('click',function(){
-      var idx=parseInt(item.dataset.cc,10);
-      for(var j=0;j<video.textTracks.length;j++){video.textTracks[j].mode=idx===j?"showing":"hidden"}
-      ccMenu.querySelectorAll('.menu-item').forEach(function(i){i.classList.remove('selected')});
-      item.classList.add('selected');
-      ccMenu.classList.remove('show');
+  // Custom subtitle system
+  var subtitleOverlay=document.getElementById('subtitleOverlay');
+  var subtitleCue=document.getElementById('subtitleCue');
+  var subtitlesOn=true;
+  var activeSubIdx=-1;
+  var subCues=[];
+
+  function parseVTT(text){
+    var cues=[];
+    var lines=text.replace(/\r\n/g,'\n').split('\n');
+    var i=0;
+    // skip header
+    while(i<lines.length&&lines[i].trim()!=='')i++;
+    while(i<lines.length){
+      // skip blank lines
+      while(i<lines.length&&lines[i].trim()==='')i++;
+      if(i>=lines.length)break;
+      // time line
+      var timeLine=lines[i];i++;
+      if(!timeLine||!timeLine.match('-->'))continue;
+      var tm=timeLine.match(/(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})/);
+      if(!tm){tm=timeLine.match(/(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2})\.(\d{3})/);if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
+      var start=parseInt(tm[1])*3600+parseInt(tm[2])*60+parseInt(tm[3])+parseInt(tm[4])/1000;
+      var end=parseInt(tm[5])*3600+parseInt(tm[6])*60+parseInt(tm[7])+parseInt(tm[8])/1000;
+      // text lines until blank
+      var text='';
+      while(i<lines.length&&lines[i].trim()!==''){
+        if(text)text+='\n';
+        text+=lines[i].replace(/<[^>]+>/g,'').trim();
+        i++;
+      }
+      if(text)cues.push({start:start,end:end,text:text});
+    }
+    return cues;
+  }
+
+  async function loadSubTrack(url){
+    try{
+      var r=await fetch(url);
+      if(!r.ok)return[];
+      var t=await r.text();
+      return parseVTT(t);
+    }catch(e){return[]}
+  }
+
+  async function initCustomSubs(){
+    var tracks=cfg.tracks||[];
+    var subTracks=tracks.filter(function(t){return t.kind==='captions'||t.kind==='subtitles'});
+    // build menu
+    ccMenu.querySelector('.menu-section').innerHTML='<div class="menu-heading">Subtitles</div><div class="menu-item selected" data-cc="-1">Off <span class="check">&#10003;</span></div>';
+    subTracks.forEach(function(trk,i){
+      var div=document.createElement('div');
+      div.className='menu-item';div.setAttribute('data-cc',String(i));
+      div.innerHTML=(trk.label||'Sub '+(i+1)).replace(/</g,'&lt;')+' <span class="check">&#10003;</span>';
+      ccMenu.querySelector('.menu-section').appendChild(div);
     });
-  });
+    // load all VTT files
+    var loaded=[];
+    for(var i=0;i<subTracks.length;i++){
+      loaded.push(loadSubTrack(subTracks[i].file));
+    }
+    var results=await Promise.all(loaded);
+    // default to first track
+    if(results.length>0&&results[0].length>0){
+      activeSubIdx=0;
+      subCues=results[0];
+      subtitlesOn=true;
+    }
+    // bind menu clicks
+    ccMenu.querySelectorAll('.menu-item').forEach(function(item){
+      item.addEventListener('click',function(){
+        var idx=parseInt(item.dataset.cc,10);
+        activeSubIdx=idx;
+        if(idx>=0&&idx<results.length){subCues=results[idx];subtitlesOn=true}
+        else{subCues=[];subtitlesOn=false}
+        ccMenu.querySelectorAll('.menu-item').forEach(function(i){i.classList.remove('selected')});
+        item.classList.add('selected');
+        ccMenu.classList.remove('show');
+      });
+    });
+  }
+
+  function renderSubtitle(){
+    if(!subtitlesOn||!subCues.length){subtitleCue.textContent='';return}
+    var t=video.currentTime;
+    for(var i=0;i<subCues.length;i++){
+      if(t>=subCues[i].start&&t<=subCues[i].end){
+        if(subtitleCue.textContent!==subCues[i].text)subtitleCue.textContent=subCues[i].text;
+        return;
+      }
+    }
+    subtitleCue.textContent='';
+  }
+
+  initCustomSubs();
+
+  // Position overlay based on controls
+  function updateSubPosition(){
+    if(player.classList.contains('hide-cursor')){subtitleOverlay.classList.add('controls-hidden')}
+    else{subtitleOverlay.classList.remove('controls-hidden')}
+  }
 
   var hls=null;
   var src=cfg.m3u8;
@@ -1397,6 +1493,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
   function showControls(){
     [topBar,bottomBar,centerTransport].forEach(function(el){el.classList.remove('hide')});
     player.classList.remove('hide-cursor');
+    subtitleOverlay.classList.remove('controls-hidden');
     clearTimeout(hideTimer);
     if(!video.paused){hideTimer=setTimeout(hideControls,3000)}
   }
@@ -1404,6 +1501,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
     if(document.querySelector('.menu.show'))return;
     [topBar,bottomBar,centerTransport].forEach(function(el){el.classList.add('hide')});
     player.classList.add('hide-cursor');
+    subtitleOverlay.classList.add('controls-hidden');
   }
   ['mousemove','mousedown','touchstart','keydown'].forEach(function(evt){player.addEventListener(evt,showControls)});
   video.addEventListener('pause',showControls);
