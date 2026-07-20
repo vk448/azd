@@ -1198,7 +1198,7 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
     .time-display{ display:none; }
 
-    .menu{ min-width:168px; font-size:12.5px; bottom:38px; }
+    .menu{ min-width:140px; max-width:160px; font-size:12.5px; bottom:38px; }
     .menu-item{ padding:6px 7px; font-size:12.5px; }
     .menu-heading{ font-size:10px; }
 
