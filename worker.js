@@ -2101,7 +2101,7 @@ async function handleRequest(request) {
         m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(mpStreamUrl) + "&headers=" + mpProxyHeaders,
         tracks: (mpResult.tracks || []).map(function(t) {
           return { label: t.label || "English", lang: t.srclang || t.label ? t.label.substring(0, 2).toLowerCase() : "en", file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + mpProxyHeaders : "", kind: t.kind || "captions", default: t.default || false };
-        }).filter(function(t) { return t.url; }),
+        }).filter(function(t) { return t.file; }),
         intro: mpResult.intro || null,
         outro: mpResult.outro || null,
         title: mpTitle + " - Ep " + mpEpisode + " (" + mpLang + ")"
