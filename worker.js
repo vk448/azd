@@ -1117,7 +1117,12 @@ const PLAYER_HTML = `<!DOCTYPE html>
     border:1px solid var(--glass-border); border-radius:10px;
     min-width:190px; padding:6px; display:none; z-index:9;
     box-shadow:0 12px 28px rgba(0,0,0,.45);
+    max-height:320px; overflow-y:auto; overflow-x:hidden;
+    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.15) transparent;
   }
+  .menu::-webkit-scrollbar{ width:5px; }
+  .menu::-webkit-scrollbar-track{ background:transparent; }
+  .menu::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.15); border-radius:4px; }
   .menu.show{ display:block; }
   .menu-section + .menu-section{ border-top:1px solid var(--glass-border); margin-top:6px; padding-top:6px; }
   .menu-heading{
