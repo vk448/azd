@@ -1991,6 +1991,98 @@ async function handleRequest(request) {
       }
     }
 
+    // ====== MegaPlay Stream API ======
+    // GET /api/megaplay/stream/{mal-id}/{episode}/{language}  — extract m3u8 + subtitles from MegaPlay
+    // GET /api/megaplay/stream/ani/{anilist-id}/{episode}/{language}  — same but via AniList ID
+    var megaplayStreamMatch = url.match(/^\/api\/megaplay\/stream\/(?:(ani)\/)?(\d+)\/(\d+)\/(sub|dub)$/);
+    if (megaplayStreamMatch) {
+      var isAniId = megaplayStreamMatch[1] === "ani";
+      var inputId = Number(megaplayStreamMatch[2]);
+      var mpEpisode = Number(megaplayStreamMatch[3]);
+      var mpLang = megaplayStreamMatch[4];
+
+      // Resolve AniList → MAL if needed
+      var mpMalId = inputId;
+      var mpTitle = "";
+      if (isAniId) {
+        var mpAniInfo = await fetchAnilistInfo(inputId);
+        mpMalId = mpAniInfo.malId;
+        mpTitle = mpAniInfo.title;
+        if (!mpMalId) {
+          return new Response(JSON.stringify({ success: false, error: "No MAL ID found for AniList ID " + inputId }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+        }
+      }
+
+      // Strategy 1: Try scrapeMegaplay (MAL-based, fetches embed page → data-id → getSources)
+      var mpResult = null;
+      try {
+        var mpScraped = await scrapeMegaplay(mpMalId, mpEpisode);
+        if (mpScraped && mpScraped[mpLang]) {
+          mpResult = mpScraped[mpLang];
+        }
+      } catch (e) { /* fall through */ }
+
+      // Strategy 2: Try AniList ID endpoint on MegaPlay (if input was AniList ID)
+      if (!mpResult && isAniId) {
+        try {
+          var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + inputId + "/" + mpEpisode + "/" + mpLang;
+          var mpAniResp = await proxyFetch(mpAniUrl);
+          if (mpAniResp.ok) {
+            var mpAniHtml = await mpAniResp.text();
+            var mpAniMatch = mpAniHtml.match(/data-id="(\d+)"/);
+            if (mpAniMatch) {
+              var mpAniSource = await getSource(Number(mpAniMatch[1]), "megaplay");
+              mpResult = Object.assign({ lang: mpLang }, formatResult(mpAniSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpAniMatch[1]) }));
+            }
+          }
+        } catch (e) { /* fall through */ }
+      }
+
+      // Strategy 3: Try direct MAL endpoint via proxy
+      if (!mpResult) {
+        try {
+          var mpDirectUrl = MEGAPLAY_BASE + "/stream/mal/" + mpMalId + "/" + mpEpisode + "/" + mpLang;
+          var mpDirectResp = await proxyFetch(mpDirectUrl);
+          if (mpDirectResp.ok) {
+            var mpDirectHtml = await mpDirectResp.text();
+            var mpDirectMatch = mpDirectHtml.match(/data-id="(\d+)"/);
+            if (mpDirectMatch) {
+              var mpDirectSource = await getSource(Number(mpDirectMatch[1]), "megaplay");
+              mpResult = Object.assign({ lang: mpLang }, formatResult(mpDirectSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpDirectMatch[1]) }));
+            }
+          }
+        } catch (e) { /* fall through */ }
+      }
+
+      if (!mpResult || !mpResult.m3u8) {
+        return new Response(JSON.stringify({ success: false, error: "No stream found for MAL " + mpMalId + " ep " + mpEpisode + " " + mpLang }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+      }
+
+      // Proxy m3u8 and subtitle URLs through our proxy so they work from any browser
+      var mpProxyHeaders = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/", "Origin": "https://megaplay.buzz" }));
+      var mpProxiedM3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(mpResult.m3u8) + "&headers=" + mpProxyHeaders;
+      var mpProxiedTracks = (mpResult.tracks || []).map(function(t) {
+        return { label: t.label || "English", lang: t.srclang || t.label ? t.label.substring(0, 2).toLowerCase() : "en", url: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + mpProxyHeaders : "", kind: t.kind || "captions", default: t.default || false };
+      }).filter(function(t) { return t.url; });
+
+      var mpResponse = {
+        success: true,
+        source: "megaplay",
+        mal_id: mpMalId,
+        episode: mpEpisode,
+        language: mpLang,
+        title: mpTitle || ("MAL " + mpMalId),
+        stream: mpProxiedM3u8,
+        subtitles: mpProxiedTracks,
+        intro: mpResult.intro || null,
+        outro: mpResult.outro || null,
+        dataId: mpResult.dataId || null,
+        _raw: { m3u8: mpResult.m3u8, tracks: mpResult.tracks || [] }
+      };
+
+      return new Response(JSON.stringify(mpResponse), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+    }
+
     if (url === "/api/health") {
       return new Response(JSON.stringify({ ok: true, time: Date.now() }), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }

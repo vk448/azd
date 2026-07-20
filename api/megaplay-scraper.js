@@ -131,7 +131,34 @@ async function scrape(malId, episode, language) {
   throw new Error(`"${language}" not available. Available: ${Object.keys(result).join(", ")}`);
 }
 
-module.exports = { scrape, scrapeBoth, scrapeMegaplay, scrapeNekoStream, scrapeVidTube };
+// === Clean JSON API output (matches /api/megaplay/stream/ response format) ===
+async function scrapeStream(malId, episode, language) {
+  const result = await scrapeBoth(malId, episode);
+  const entry = result[language];
+  if (!entry) throw new Error(`"${language}" not available. Available: ${Object.keys(result).join(", ")}`);
+
+  return {
+    success: true,
+    source: "megaplay",
+    mal_id: malId,
+    episode: episode,
+    language: language,
+    stream: entry.m3u8 || null,
+    subtitles: (entry.tracks || []).map(t => ({
+      label: t.label || "English",
+      lang: t.label ? t.label.substring(0, 2).toLowerCase() : "en",
+      url: t.file || "",
+      kind: t.kind || "captions",
+      default: t.default || false,
+    })).filter(t => t.url),
+    intro: entry.intro || null,
+    outro: entry.outro || null,
+    dataId: entry.dataId || null,
+    _raw: { m3u8: entry.m3u8, tracks: entry.tracks || [] },
+  };
+}
+
+module.exports = { scrape, scrapeBoth, scrapeMegaplay, scrapeNekoStream, scrapeVidTube, scrapeStream };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
@@ -140,16 +167,19 @@ if (require.main === module) {
       .then(r => console.log(JSON.stringify(r, null, 2)))
       .catch(e => { console.error("Error:", e.message); process.exit(1); });
   } else if (args.length >= 2) {
-    const fn = args.length === 2 ? scrapeBoth : scrape;
-    const fnArgs = args.length === 2 ? [Number(args[0]), Number(args[1])] : [Number(args[0]), Number(args[1]), args[2]];
-    fn(...fnArgs)
+    const fn = args.length === 2 ? scrapeStream : scrapeStream;
+    const lang = args[2] || "sub";
+    scrapeStream(Number(args[0]), Number(args[1]), lang)
       .then(r => console.log(JSON.stringify(r, null, 2)))
       .catch(e => { console.error("Error:", e.message); process.exit(1); });
   } else {
     console.log("Usage:");
-    console.log("  node megaplay-scraper.js <mal-id> <episode>           (both sub+dub)");
-    console.log("  node megaplay-scraper.js <mal-id> <episode> <sub|dub>  (single lang)");
-    console.log("  node megaplay-scraper.js <vidtube-url>                (extract from vidtube embed)");
+    console.log("  node megaplay-scraper.js <mal-id> <episode> [sub|dub]");
+    console.log("  node megaplay-scraper.js <vidtube-url>");
+    console.log("");
+    console.log("Examples:");
+    console.log("  node megaplay-scraper.js 21 1 sub      # Steins;Gate ep 1 sub");
+    console.log("  node megaplay-scraper.js 21 1 dub      # Steins;Gate ep 1 dub");
     process.exit(1);
   }
 }
