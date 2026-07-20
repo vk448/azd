@@ -170,7 +170,7 @@ function fromBase64(str) {
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MEGAPLAY_BASE = "https://megaplay.buzz";
 const VIDTUBE_BASE = "https://vidtube.site";
-const MEGAPLAY_PROXY = "https://megaplay-proxy.ak6339575.workers.dev"; // Second account proxy
+const MEGAPLAY_PROXY = "https://megaplay-proxy.sd2293292.workers.dev"; // Proxy worker (same account)
 const WORKER_DOMAINS = [
   "official9animedownloader.workerforcloud.workers.dev",
   "official9animedownloader.workerforcloud3.workers.dev",

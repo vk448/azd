@@ -1,0 +1,8 @@
+name = "megaplay-proxy"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+# Deploy this on your SECOND Cloudflare account (ak6339575@gmail.com)
+# Usage: cd megaplay-proxy && npx wrangler deploy
+# 
+# After deployment, update PROXY_URL in the main worker.js
