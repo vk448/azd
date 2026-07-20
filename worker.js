@@ -1067,16 +1067,20 @@ const PLAYER_HTML = `<!DOCTYPE html>
     position:relative; flex:1; height:16px;
     display:flex; align-items:center; cursor:pointer;
   }
-  .scrub-track .rail{ position:absolute; left:0; right:0; height:3px; border-radius:2px; background:var(--track-bg); }
-  .scrub-track .buffered{ position:absolute; height:3px; border-radius:2px; background:rgba(255,255,255,0.32); width:0%; }
-  .scrub-track .played{ position:absolute; height:3px; border-radius:2px; background:var(--amber); width:0%; }
+  .scrub-track .rail{ position:absolute; left:0; right:0; height:3px; border-radius:2px; background:var(--track-bg); transition: height .15s ease, background .15s ease; }
+  .scrub-track .buffered{ position:absolute; height:3px; border-radius:2px; background:rgba(255,255,255,0.32); width:0%; transition: height .15s ease; }
+  .scrub-track .played{ position:absolute; height:3px; border-radius:2px; background:var(--amber); width:0%; transition: height .15s ease; }
   .scrub-track .knob{
     position:absolute; top:50%; transform:translate(-50%,-50%);
     width:13px; height:13px; border-radius:50%; background:var(--amber);
     box-shadow:0 0 0 3px rgba(242,169,59,.22); left:0%;
-    transition: box-shadow .15s ease;
+    transition: box-shadow .15s ease, transform .15s ease;
   }
   .scrub-track:hover .knob{ box-shadow:0 0 0 5px rgba(242,169,59,.3); }
+  .scrub-track.scrubbing .rail{ height:5px; background:rgba(245,169,63,0.25); }
+  .scrub-track.scrubbing .buffered{ height:5px; }
+  .scrub-track.scrubbing .played{ height:5px; }
+  .scrub-track.scrubbing .knob{ transform:translate(-50%,-50%) scale(1.25); box-shadow:0 0 0 6px rgba(242,169,59,.35); }
 
   .controls-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .controls-left,.controls-right{ display:flex; align-items:center; gap:6px; }
@@ -1463,12 +1467,12 @@ const PLAYER_HTML = `<!DOCTYPE html>
     video.currentTime=pct*(video.duration||0);
   }
   var scrubbing=false;
-  scrubTrack.addEventListener('mousedown',function(e){scrubbing=true;scrubTo(e.clientX)});
+  scrubTrack.addEventListener('mousedown',function(e){scrubbing=true;scrubTrack.classList.add('scrubbing');scrubTo(e.clientX)});
   window.addEventListener('mousemove',function(e){if(scrubbing)scrubTo(e.clientX)});
-  window.addEventListener('mouseup',function(){scrubbing=false});
-  scrubTrack.addEventListener('touchstart',function(e){scrubbing=true;scrubTo(e.touches[0].clientX)},{passive:true});
+  window.addEventListener('mouseup',function(){scrubbing=false;scrubTrack.classList.remove('scrubbing')});
+  scrubTrack.addEventListener('touchstart',function(e){scrubbing=true;scrubTrack.classList.add('scrubbing');scrubTo(e.touches[0].clientX)},{passive:true});
   scrubTrack.addEventListener('touchmove',function(e){if(scrubbing)scrubTo(e.touches[0].clientX)},{passive:true});
-  scrubTrack.addEventListener('touchend',function(){scrubbing=false});
+  scrubTrack.addEventListener('touchend',function(){scrubbing=false;scrubTrack.classList.remove('scrubbing')});
 
   var lastVolume=1;
   volSlider.addEventListener('input',function(){
