@@ -2094,26 +2094,13 @@ async function handleRequest(request) {
         return new Response(JSON.stringify({ success: false, error: "No working stream found for AniList " + mpAnilistId + " (MAL " + mpMalId + ") ep " + mpEpisode + " " + mpLang }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
       }
 
-      // Build player config with proxied URLs (detect CDN for correct headers)
+      // Build player config with proxied URLs
       var mpStreamUrl = mpResult.m3u8;
-      var mpReferer = "https://megaplay.buzz/";
-      var mpOrigin = "https://megaplay.buzz";
-      if (mpStreamUrl.indexOf("nekostream") > -1 || mpStreamUrl.indexOf("lostproject") > -1) {
-        mpReferer = "https://anikototv.to/";
-        mpOrigin = "https://anikototv.to";
-      } else if (mpStreamUrl.indexOf("vibeplayer") > -1) {
-        mpReferer = "https://vibeplayer.site/";
-        mpOrigin = "https://vibeplayer.site";
-      } else if (mpStreamUrl.indexOf("megacloud") > -1) {
-        mpReferer = "";
-        mpOrigin = "";
-      }
-      var mpProxyHeaders = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": mpReferer, "Origin": mpOrigin }));
+      var mpProxyHeaders = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/", "Origin": "https://megaplay.buzz" }));
       var mpPlayerConfig = {
         m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(mpStreamUrl) + "&headers=" + mpProxyHeaders,
         tracks: (mpResult.tracks || []).map(function(t) {
-          var tHeaders = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": mpReferer, "Origin": mpOrigin }));
-          return { label: t.label || "English", lang: t.srclang || t.label ? t.label.substring(0, 2).toLowerCase() : "en", file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + tHeaders : "", kind: t.kind || "captions", default: t.default || false };
+          return { label: t.label || "English", lang: t.srclang || t.label ? t.label.substring(0, 2).toLowerCase() : "en", file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + mpProxyHeaders : "", kind: t.kind || "captions", default: t.default || false };
         }).filter(function(t) { return t.url; }),
         intro: mpResult.intro || null,
         outro: mpResult.outro || null,
