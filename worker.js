@@ -2007,10 +2007,10 @@ async function handleRequest(request) {
         return new Response(JSON.stringify({ success: false, error: "No MAL ID found for AniList ID " + mpAnilistId }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
       }
 
-      // Strategy 1: Try scrapeMegaplay (MAL-based, fetches embed page → data-id → getSources)
+      // Strategy 1: Use scrapeBoth (MegaPlay + NekoStream fallbacks)
       var mpResult = null;
       try {
-        var mpScraped = await scrapeMegaplay(mpMalId, mpEpisode);
+        var mpScraped = await scrapeBoth(mpMalId, mpEpisode);
         if (mpScraped && mpScraped[mpLang]) {
           mpResult = mpScraped[mpLang];
         }
@@ -2019,7 +2019,7 @@ async function handleRequest(request) {
       // Strategy 2: Try AniList ID endpoint on MegaPlay
       if (!mpResult) {
         try {
-          var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + inputId + "/" + mpEpisode + "/" + mpLang;
+          var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + mpAnilistId + "/" + mpEpisode + "/" + mpLang;
           var mpAniResp = await proxyFetch(mpAniUrl);
           if (mpAniResp.ok) {
             var mpAniHtml = await mpAniResp.text();
