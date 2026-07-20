@@ -654,12 +654,27 @@ function formatResult(source, meta) {
 async function getSource(embedId, site) {
   var base = site === "vidtube" ? VIDTUBE_BASE : MEGAPLAY_BASE;
   if (site === "megaplay") {
-    var proxyUrl = MEGAPLAY_PROXY + "/?url=" + encodeURIComponent(base + "/stream/getSourcesNew?id=" + embedId) + "&headers=" + encodeURIComponent(JSON.stringify({ "X-Requested-With": "XMLHttpRequest" }));
-    var r = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
-    if (!r.ok) throw new Error("getSources proxy " + embedId + ": " + r.status);
-    var d = await r.json();
-    if (d.error) throw new Error(d.message || d.error);
-    return d;
+    // Try direct first, fall back to proxy if blocked
+    try {
+      var r = await fetch(base + "/stream/getSources?id=" + embedId, {
+        headers: { "User-Agent": UA, "Referer": base + "/", "X-Requested-With": "XMLHttpRequest" },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (r.ok) {
+        var d = await r.json();
+        if (!d.error) return d;
+      }
+    } catch (e) {}
+    // Fallback: try via proxy
+    try {
+      var proxyUrl = MEGAPLAY_PROXY + "/?url=" + encodeURIComponent(base + "/stream/getSources?id=" + embedId) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": base + "/", "X-Requested-With": "XMLHttpRequest" }));
+      var r2 = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+      if (r2.ok) {
+        var d2 = await r2.json();
+        if (!d2.error) return d2;
+      }
+    } catch (e) {}
+    throw new Error("getSources " + embedId + ": all methods failed");
   }
   var r = await fetch(base + "/stream/getSources?id=" + embedId, {
     headers: { "User-Agent": UA, "Referer": base + "/", "X-Requested-With": "XMLHttpRequest" }
@@ -671,10 +686,18 @@ async function getSource(embedId, site) {
 }
 
 async function proxyFetch(targetUrl, extraHeaders) {
+  // Try direct first, fall back to proxy if blocked
+  var fetchHeaders = { "User-Agent": UA, "Referer": "https://megaplay.buzz/" };
+  if (extraHeaders) Object.assign(fetchHeaders, extraHeaders);
+  try {
+    var r = await fetch(targetUrl, { headers: fetchHeaders, signal: AbortSignal.timeout(10000) });
+    return r;
+  } catch (e) {}
+  // Fallback: try via proxy
   var h = extraHeaders ? encodeURIComponent(JSON.stringify(extraHeaders)) : "";
   var proxyUrl = MEGAPLAY_PROXY + "/?url=" + encodeURIComponent(targetUrl) + (h ? "&headers=" + h : "");
-  var r = await fetch(proxyUrl, { signal: AbortSignal.timeout(20000) });
-  return r;
+  var r2 = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+  return r2;
 }
 
 async function scrapeMegaplay(malId, episode) {
