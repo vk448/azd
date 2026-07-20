@@ -170,6 +170,7 @@ function fromBase64(str) {
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MEGAPLAY_BASE = "https://megaplay.buzz";
 const VIDTUBE_BASE = "https://vidtube.site";
+const MEGAPLAY_PROXY = "https://megaplay-proxy.ak6339575.workers.dev"; // Second account proxy
 const WORKER_DOMAINS = [
   "official9animedownloader.workerforcloud.workers.dev",
   "official9animedownloader.workerforcloud3.workers.dev",
@@ -225,7 +226,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
 
   for (var attempt = 0; attempt < 2; attempt++) {
     try {
-      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(8000) });
+      var r = await fetch(apiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!r.ok) { if (attempt < 1) continue; return null; }
       var data = await r.json();
       if (!data || !data.embeds || data.embeds.length === 0) { if (attempt < 1) continue; return null; }
@@ -235,6 +236,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
     var sources = data.sources || [];
     var m3u8Url = null;
     var usedEmbed = null;
+    var embedTracks = [];
 
     for (var ei = 0; ei < embeds.length; ei++) {
       var eUrl = embeds[ei].url;
@@ -246,9 +248,14 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
       }
       var scraped = await scrapeM3u8FromEmbed(eUrl);
       if (scraped) {
-        m3u8Url = scraped;
-        usedEmbed = eUrl;
-        break;
+        if (scraped.m3u8) {
+          m3u8Url = scraped.m3u8;
+          usedEmbed = eUrl;
+        }
+        if (scraped.tracks && scraped.tracks.length) {
+          embedTracks = scraped.tracks;
+        }
+        if (m3u8Url) break;
       }
     }
 
@@ -277,6 +284,12 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
         }
       }
     }
+    // Merge tracks from embed page scraping
+    for (var eti = 0; eti < embedTracks.length; eti++) {
+      if (!tracks.some(function(t) { return t.file === embedTracks[eti].file; })) {
+        tracks.push(Object.assign({}, embedTracks[eti], { default: false }));
+      }
+    }
 
     // Merge SUB subtitles into DUB
     if (lang === "dub" && tracks.length <= 1) {
@@ -288,7 +301,7 @@ async function scrapeEmbeds(anilistId, episode, lang, serverName) {
           subTracksToAdd = subCached.tracks;
         } else {
           var subApiUrl = ANIKAGE_API_BASE + "/" + anilistId + "/episodes/" + episode + "/sources?provider=" + provider + "&lang=sub";
-          var subR = await fetch(subApiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(8000) });
+          var subR = await fetch(subApiUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(15000) });
           if (subR.ok) {
             var subData = await subR.json();
             if (subData && subData.sources) {
@@ -340,48 +353,90 @@ async function scrapeM3u8FromEmbed(embedUrl) {
     var origin = new URL(embedUrl).origin;
     var r = await fetch(embedUrl, {
       headers: { "User-Agent": UA, "Referer": origin + "/" },
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!r.ok) return null;
     var html = await r.text();
+    var result = { m3u8: null, tracks: [] };
 
     var m3u8Regex = /https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/g;
     var matches = html.match(m3u8Regex);
     if (matches && matches.length > 0) {
       var filtered = matches.filter(function(u) { return u.indexOf("prox.anikage.cc") === -1 && u.indexOf("prox.anicore.tv") === -1; });
-      if (filtered.length > 0) return filtered[0];
+      if (filtered.length > 0) result.m3u8 = filtered[0];
     }
 
-    var srcRegex = /src\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/g;
-    var srcMatch;
-    while ((srcMatch = srcRegex.exec(html)) !== null) {
-      var srcUrl = srcMatch[1];
-      if (srcUrl.indexOf("prox.anikage.cc") === -1 && srcUrl.indexOf("prox.anicore.tv") === -1) return srcUrl;
+    if (!result.m3u8) {
+      var srcRegex = /src\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/g;
+      var srcMatch;
+      while ((srcMatch = srcRegex.exec(html)) !== null) {
+        var srcUrl = srcMatch[1];
+        if (srcUrl.indexOf("prox.anikage.cc") === -1 && srcUrl.indexOf("prox.anicore.tv") === -1) { result.m3u8 = srcUrl; break; }
+      }
     }
 
-    var dataIdMatch = html.match(/data-id="([^"]+)"/);
-    if (dataIdMatch) {
-      var srcUrl2 = origin + "/stream/getSources?id=" + dataIdMatch[1];
-      var r2 = await fetch(srcUrl2, {
-        headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
-        signal: AbortSignal.timeout(8000)
-      });
-      if (r2.ok) {
-        var srcData = await r2.json();
-        if (srcData && srcData.sources) {
-          var srcFile = srcData.sources.file || srcData.sources[0] && srcData.sources[0].file;
-          if (srcFile && srcFile.indexOf("prox.anikage.cc") === -1 && srcFile.indexOf("prox.anicore.tv") === -1) return srcFile;
+    if (!result.m3u8) {
+      var dataIdMatch = html.match(/data-id="([^"]+)"/);
+      if (dataIdMatch) {
+        var srcUrl2 = origin + "/stream/getSources?id=" + dataIdMatch[1];
+        try {
+          var r2 = await fetch(srcUrl2, {
+            headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
+            signal: AbortSignal.timeout(15000)
+          });
+          if (r2.ok) {
+            var srcData = await r2.json();
+            if (srcData && srcData.sources) {
+              var srcFile = srcData.sources.file || srcData.sources[0] && srcData.sources[0].file;
+              if (srcFile && srcFile.indexOf("prox.anikage.cc") === -1 && srcFile.indexOf("prox.anicore.tv") === -1) result.m3u8 = srcFile;
+            }
+            if (srcData && srcData.tracks && srcData.tracks.length) {
+              for (var ti = 0; ti < srcData.tracks.length; ti++) {
+                var trk = srcData.tracks[ti];
+                if (trk.file && trk.file.startsWith("http")) {
+                  result.tracks.push({ file: trk.file, label: trk.label || "English", kind: trk.kind || "captions", default: trk.default || false });
+                }
+              }
+            }
+          }
+        } catch (e2) {}
+      }
+    }
+
+    if (!result.m3u8) {
+      var configMatch = html.match(/file\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
+      if (configMatch && configMatch[1].indexOf("prox.anikage.cc") === -1) result.m3u8 = configMatch[1];
+    }
+
+    if (!result.m3u8) {
+      var playerMatch = html.match(/player\s*\(\s*\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)/);
+      if (playerMatch && playerMatch[1].indexOf("prox.anikage.cc") === -1) result.m3u8 = playerMatch[1];
+    }
+
+    // Extract VTT subtitle URLs from embed page
+    var vttRegex = /https?:\/\/[^\s"'<>]+\.vtt[^\s"'<>]*/g;
+    var vttMatches = html.match(vttRegex);
+    if (vttMatches && vttMatches.length > 0) {
+      for (var vi = 0; vi < vttMatches.length; vi++) {
+        var vUrl = vttMatches[vi].replace(/\\u002F/g, '/');
+        if (!result.tracks.some(function(t) { return t.file === vUrl; })) {
+          result.tracks.push({ file: vUrl, label: "English", kind: "captions", default: result.tracks.length === 0 });
         }
       }
     }
 
-    var configMatch = html.match(/file\s*[:=]\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
-    if (configMatch && configMatch[1].indexOf("prox.anikage.cc") === -1) return configMatch[1];
+    // Also extract subtitle URLs from file:"..." patterns
+    var subFileRegex = /file\s*[:=]\s*["'](https?:\/\/[^\s"'<>]+\.vtt[^"']*)/g;
+    var subFileMatch;
+    while ((subFileMatch = subFileRegex.exec(html)) !== null) {
+      var sUrl = subFileMatch[1];
+      if (!result.tracks.some(function(t) { return t.file === sUrl; })) {
+        result.tracks.push({ file: sUrl, label: "English", kind: "captions", default: result.tracks.length === 0 });
+      }
+    }
 
-    var playerMatch = html.match(/player\s*\(\s*\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)/);
-    if (playerMatch && playerMatch[1].indexOf("prox.anikage.cc") === -1) return playerMatch[1];
-
-    return null;
+    if (!result.m3u8) return null;
+    return result;
   } catch (e) {
     return null;
   }
@@ -598,6 +653,14 @@ function formatResult(source, meta) {
 
 async function getSource(embedId, site) {
   var base = site === "vidtube" ? VIDTUBE_BASE : MEGAPLAY_BASE;
+  if (site === "megaplay") {
+    var proxyUrl = MEGAPLAY_PROXY + "/?url=" + encodeURIComponent(base + "/stream/getSourcesNew?id=" + embedId) + "&headers=" + encodeURIComponent(JSON.stringify({ "X-Requested-With": "XMLHttpRequest" }));
+    var r = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error("getSources proxy " + embedId + ": " + r.status);
+    var d = await r.json();
+    if (d.error) throw new Error(d.message || d.error);
+    return d;
+  }
   var r = await fetch(base + "/stream/getSources?id=" + embedId, {
     headers: { "User-Agent": UA, "Referer": base + "/", "X-Requested-With": "XMLHttpRequest" }
   });
@@ -607,12 +670,20 @@ async function getSource(embedId, site) {
   return d;
 }
 
+async function proxyFetch(targetUrl, extraHeaders) {
+  var h = extraHeaders ? encodeURIComponent(JSON.stringify(extraHeaders)) : "";
+  var proxyUrl = MEGAPLAY_PROXY + "/?url=" + encodeURIComponent(targetUrl) + (h ? "&headers=" + h : "");
+  var r = await fetch(proxyUrl, { signal: AbortSignal.timeout(20000) });
+  return r;
+}
+
 async function scrapeMegaplay(malId, episode) {
   var output = {};
   var base = { mal_id: String(malId), episode: episode };
   var results = await Promise.allSettled(["sub", "dub"].map(async function(lang) {
     var url = MEGAPLAY_BASE + "/stream/mal/" + malId + "/" + episode + "/" + lang;
-    var r = await fetch(url, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
+    var r = await proxyFetch(url);
+    if (!r.ok) throw new Error("embed page " + r.status);
     var html = await r.text();
     var match = html.match(/data-id="(\d+)"/);
     if (!match) throw new Error("No data-id");
@@ -829,26 +900,16 @@ const PLAYER_HTML = `<!DOCTYPE html>
     position:fixed; inset:0;
     width:100vw; height:100vh;
     background:radial-gradient(120% 140% at 50% 0%, #14121a 0%, var(--stage) 60%);
+    border-radius:0;
+    box-shadow:none;
     overflow:hidden; user-select:none; outline:none;
   }
   .player video{
     width:100%; height:100%; display:block; background:#000; object-fit:contain;
   }
-
-  .scrim-top,.scrim-bottom{
-    position:absolute; left:0; right:0; pointer-events:none;
-    transition: opacity .35s ease;
+  .player:fullscreen, .player:-webkit-full-screen{
+    width:100%; height:100%; border-radius:0;
   }
-  .scrim-top{ top:0; height:150px; background:linear-gradient(to bottom, rgba(0,0,0,.55), transparent); }
-  .scrim-bottom{ bottom:0; height:260px; background:linear-gradient(to top, rgba(0,0,0,.7), transparent); }
-
-  .accent-line{
-    position:absolute; top:0; left:0; right:0; height:2px; z-index:6;
-    background:linear-gradient(90deg, transparent, var(--amber), var(--amber2), transparent);
-    background-size:200% 100%;
-    animation: sheen 6s linear infinite; opacity:.85;
-  }
-  @keyframes sheen{ 0%{ background-position:0% 0; } 100%{ background-position:200% 0; } }
 
   .top-bar{
     position:absolute; top:20px; left:20px; right:20px;
@@ -904,6 +965,19 @@ const PLAYER_HTML = `<!DOCTYPE html>
   .skip-pill.show{ opacity:1; transform:translateY(0); pointer-events:auto; }
   .skip-pill:hover{ border-color: var(--amber); }
   .skip-pill svg{ width:14px; height:14px; stroke:var(--amber); }
+
+  .seek-flash{
+    position:absolute; top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    color:var(--ivory); font-size:12px; font-weight:600;
+    background:rgba(0,0,0,.55); border-radius:50%;
+    width:64px; height:64px; justify-content:center;
+    opacity:0; z-index:7; pointer-events:none;
+    transition: opacity .3s ease;
+  }
+  .seek-flash.left{ left:14%; }
+  .seek-flash.right{ right:14%; }
+  .seek-flash.active{ opacity:1; }
 
   .center-transport{
     position:absolute; inset:0;
@@ -1044,25 +1118,89 @@ const PLAYER_HTML = `<!DOCTYPE html>
     position:absolute; left:0; right:0; bottom:104px;
     display:flex; justify-content:center; z-index:5;
     pointer-events:none; padding:0 24px;
-    transition: bottom .3s ease;
+    transition: bottom .35s ease;
   }
-  .subtitle-overlay.controls-hidden{ bottom:20px; }
+  .subtitle-overlay.controls-hidden{ bottom:26px; }
   .subtitle-overlay .cue{
-    background:rgba(6,6,8,0.78);
-    backdrop-filter:blur(4px);
-    -webkit-backdrop-filter:blur(4px);
-    color:#fff; font-size:15px; font-weight:500;
-    line-height:1.4; padding:5px 14px; border-radius:6px;
+    background:rgba(6,6,8,0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color:#fff; font-size:16px; font-weight:500;
+    line-height:1.4; padding:6px 14px; border-radius:6px;
     text-align:center; max-width:80%;
-    transition: opacity .15s ease, transform .15s ease;
+    opacity:0; transform:translateY(4px);
+    transition: opacity .18s ease, transform .18s ease;
   }
-  .subtitle-overlay .cue:empty{ display:none; }
+  .subtitle-overlay .cue.show{ opacity:1; transform:translateY(0); }
+
+  @media (max-width:760px){
+    .top-bar{ top:12px; left:12px; right:12px; }
+    .title-block{ padding:8px 12px; border-radius:11px; max-width:62%; }
+    .title-block h1{ font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .title-block .kicker{ font-size:9.5px; }
+    .icon-btn{ width:32px; height:32px; border-radius:9px; }
+    .icon-btn svg{ width:15px; height:15px; }
+
+    .bottom-bar{ left:10px; right:10px; bottom:10px; padding:8px 10px 10px; border-radius:14px; }
+    .skip-pill{ right:12px; bottom:100px; font-size:12px; padding:8px 12px; }
+    .subtitle-overlay{ bottom:92px; padding:0 14px; }
+    .subtitle-overlay.controls-hidden{ bottom:20px; }
+    .subtitle-overlay .cue{ font-size:14px; padding:5px 11px; max-width:92%; }
+  }
 
   @media (max-width:560px){
     .transport-btn.seek{ width:40px; height:40px; }
+    .transport-btn.seek svg{ width:18px; height:18px; }
     .transport-btn.play{ width:56px; height:56px; }
-    .title-block h1{ font-size:13.5px; }
-    .center-transport{ gap:22px; }
+    .transport-btn.play svg{ width:22px; height:22px; }
+    .title-block h1{ font-size:13px; }
+    .center-transport{ gap:16px; }
+
+    .progress-row{ gap:6px; margin-bottom:6px; }
+    .time{ font-size:10.5px; min-width:30px; }
+    .scrub-track{ height:24px; }
+
+    .controls-row{ gap:2px; }
+    .controls-left{ gap:2px; flex:1; min-width:0; }
+    .controls-right{ gap:0; }
+    .flat-btn{ width:28px; height:28px; border-radius:6px; }
+    .flat-btn svg{ width:16px; height:16px; }
+
+    .vol-wrap input[type=range]{ width:42px; opacity:1; }
+
+    .time-display{ display:none; }
+
+    .menu{ min-width:168px; font-size:12.5px; bottom:38px; }
+    .menu-item{ padding:6px 7px; font-size:12.5px; }
+    .menu-heading{ font-size:10px; }
+
+    .skip-pill{ right:10px; bottom:92px; font-size:11.5px; padding:7px 10px; gap:6px; }
+    .skip-pill svg{ width:12px; height:12px; }
+    .subtitle-overlay{ bottom:82px; }
+    .subtitle-overlay .cue{ font-size:12.5px; }
+  }
+
+  @media (max-width:380px){
+    .title-block{ max-width:56%; padding:7px 10px; }
+    .title-block h1{ font-size:12px; }
+    .title-block .kicker{ display:none; }
+    .transport-btn.play{ width:50px; height:50px; }
+    .center-transport{ gap:12px; }
+    .controls-right .flat-btn:nth-child(3){ display:none; }
+    .vol-wrap input[type=range]{ width:32px; }
+  }
+
+  @media (max-height:420px){
+    .top-bar{ top:8px; left:8px; right:8px; }
+    .title-block{ padding:6px 10px; }
+    .title-block .kicker{ display:none; }
+    .bottom-bar{ bottom:8px; left:8px; right:8px; padding:6px 10px 8px; }
+    .progress-row{ margin-bottom:4px; }
+    .transport-btn.play{ width:46px; height:46px; }
+    .transport-btn.seek{ width:36px; height:36px; }
+    .center-transport{ gap:14px; }
+    .skip-pill{ bottom:70px; padding:6px 10px; font-size:11.5px; }
+    .subtitle-overlay{ bottom:64px; }
   }
 </style>
 </head>
@@ -1089,6 +1227,15 @@ const PLAYER_HTML = `<!DOCTYPE html>
     <div class="skip-pill" id="skipOutro">
       Skip Outro
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4l10 8-10 8V4zM19 5v14" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+
+    <div class="seek-flash left" id="flashLeft">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      10s
+    </div>
+    <div class="seek-flash right" id="flashRight">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M6 17l5-5-5-5M13 17l5-5-5-5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      10s
     </div>
 
     <div class="center-transport" id="centerTransport">
@@ -1253,8 +1400,13 @@ const PLAYER_HTML = `<!DOCTYPE html>
   function seekBy(sec){
     video.currentTime=Math.min(Math.max(0,video.currentTime+sec),video.duration||1e9);
   }
-  document.getElementById('back10').addEventListener('click',function(e){e.stopPropagation();seekBy(-10)});
-  document.getElementById('fwd10').addEventListener('click',function(e){e.stopPropagation();seekBy(10)});
+  function flash(el){
+    el.classList.add('active');
+    clearTimeout(el._t);
+    el._t=setTimeout(function(){el.classList.remove('active')},450);
+  }
+  document.getElementById('back10').addEventListener('click',function(e){e.stopPropagation();seekBy(-10);flash(document.getElementById('flashLeft'))});
+  document.getElementById('fwd10').addEventListener('click',function(e){e.stopPropagation();seekBy(10);flash(document.getElementById('flashRight'))});
 
   video.addEventListener('timeupdate',function(){
     if(!video.duration)return;
@@ -1352,9 +1504,9 @@ const PLAYER_HTML = `<!DOCTYPE html>
       if(i>=lines.length)break;
       var timeLine=lines[i];i++;
       if(!timeLine||timeLine.indexOf('-->')===-1)continue;
-      var ts='(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{1,2}):(\\d{2}):(\\d{2})\\.(\\d{3})';
+      var ts='(\\\\d{1,2}):(\\\\d{2}):(\\\\d{2})\\\\.(\\\\d{3})\\\\s*-->\\\\s*(\\\\d{1,2}):(\\\\d{2}):(\\\\d{2})\\\\.(\\\\d{3})';
       var tm=timeLine.match(new RegExp(ts));
-      if(!tm){var ts2='(\\d{2}):(\\d{2})\\.(\\d{3})\\s*-->\\s*(\\d{2}):(\\d{2})\\.(\\d{3})';tm=timeLine.match(new RegExp(ts2));if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
+      if(!tm){var ts2='(\\\\d{2}):(\\\\d{2})\\\\.(\\\\d{3})\\\\s*-->\\\\s*(\\\\d{2}):(\\\\d{2})\\\\.(\\\\d{3})';tm=timeLine.match(new RegExp(ts2));if(tm){tm=[0,'0',tm[1],tm[2],tm[3],'0',tm[4],tm[5],tm[6]]}else continue}
       var start=parseInt(tm[1])*3600+parseInt(tm[2])*60+parseInt(tm[3])+parseInt(tm[4])/1000;
       var end=parseInt(tm[5])*3600+parseInt(tm[6])*60+parseInt(tm[7])+parseInt(tm[8])/1000;
       var txt='';
@@ -1379,28 +1531,25 @@ const PLAYER_HTML = `<!DOCTYPE html>
 
   async function initCustomSubs(){
     var tracks=cfg.tracks||[];
-    var subTracks=tracks.filter(function(t){return t.kind==='captions'||t.kind==='subtitles'});
-    // build menu
+    var subTracks=tracks.filter(function(t){return t.file});
+    if(!subTracks.length)return;
     ccMenu.querySelector('.menu-section').innerHTML='<div class="menu-heading">Subtitles</div><div class="menu-item selected" data-cc="-1">Off <span class="check">&#10003;</span></div>';
     subTracks.forEach(function(trk,i){
       var div=document.createElement('div');
       div.className='menu-item';div.setAttribute('data-cc',String(i));
-      div.innerHTML=(trk.label||'Sub '+(i+1)).replace(/</g,'&lt;')+' <span class="check">&#10003;</span>';
+      div.innerHTML=(trk.label||trk.lang||'Sub '+(i+1)).replace(/</g,'&lt;')+' <span class="check">&#10003;</span>';
       ccMenu.querySelector('.menu-section').appendChild(div);
     });
-    // load all VTT files
     var loaded=[];
     for(var i=0;i<subTracks.length;i++){
       loaded.push(loadSubTrack(subTracks[i].file));
     }
     var results=await Promise.all(loaded);
-    // default to first track
     if(results.length>0&&results[0].length>0){
       activeSubIdx=0;
       subCues=results[0];
       subtitlesOn=true;
     }
-    // bind menu clicks
     ccMenu.querySelectorAll('.menu-item').forEach(function(item){
       item.addEventListener('click',function(){
         var idx=parseInt(item.dataset.cc,10);
@@ -1410,20 +1559,22 @@ const PLAYER_HTML = `<!DOCTYPE html>
         ccMenu.querySelectorAll('.menu-item').forEach(function(i){i.classList.remove('selected')});
         item.classList.add('selected');
         ccMenu.classList.remove('show');
+        renderSubtitle();
       });
     });
   }
 
   function renderSubtitle(){
-    if(!subtitlesOn||!subCues.length){subtitleCue.textContent='';return}
+    if(!subtitlesOn||!subCues.length){subtitleCue.classList.remove('show');return}
     var t=video.currentTime;
     for(var i=0;i<subCues.length;i++){
       if(t>=subCues[i].start&&t<=subCues[i].end){
         if(subtitleCue.textContent!==subCues[i].text)subtitleCue.textContent=subCues[i].text;
+        subtitleCue.classList.add('show');
         return;
       }
     }
-    subtitleCue.textContent='';
+    subtitleCue.classList.remove('show');
   }
 
   initCustomSubs();
@@ -1514,7 +1665,8 @@ const PLAYER_HTML = `<!DOCTYPE html>
       clearTimeout(clickTimer);clickTimer=null;
       var rect=player.getBoundingClientRect();
       var x=e.clientX-rect.left;
-      if(x<rect.width/2)seekBy(-10);else seekBy(10);
+      if(x<rect.width/2){seekBy(-10);flash(document.getElementById('flashLeft'))}
+      else{seekBy(10);flash(document.getElementById('flashRight'))}
     }else{
       clickTimer=setTimeout(function(){clickTimer=null;togglePlay()},220);
     }
@@ -1876,74 +2028,82 @@ async function handleRequest(request) {
       var wLang = watchMegaMatch[3];
       var wAnilistInfo = await fetchAnilistInfo(wAnilistId);
       var wTitle = wAnilistInfo.title;
-      var wCacheKey = "mp-" + wAnilistId + "-" + wEpisode + "-" + wLang;
-      var wData = getScrapeCache(wCacheKey);
-      var wEmbedUrl = "";
 
-      if (!wData) {
+      if (!wAnilistInfo.malId) {
+        return new Response(JSON.stringify({ error: "No MAL ID found for anilist " + wAnilistId }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+      }
+
+      // Step 1: Try scrapeMegaplay (sub + dub via proxy)
+      var wScraped = null;
+      try {
+        wScraped = await scrapeMegaplay(wAnilistInfo.malId, wEpisode);
+      } catch (e) {}
+
+      // Step 2: If specific lang missing, try individual scrape
+      if (!wScraped || !wScraped[wLang]) {
         try {
-          var akEmbedUrl = await findAnikotoEmbedUrl(wAnilistId, wEpisode, wLang);
-          if (akEmbedUrl) {
-            wEmbedUrl = akEmbedUrl;
-            var akPageRes = await fetch(akEmbedUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
-            if (akPageRes.ok) {
-              var akHtml = await akPageRes.text();
-              var akDataIdMatch = akHtml.match(/data-id="(\d+)"/);
-              if (akDataIdMatch) {
-                var akSrcRes = await fetch("https://megaplay.buzz/stream/getSources?id=" + akDataIdMatch[1], {
-                  headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/", "X-Requested-With": "XMLHttpRequest" }
-                });
-                if (akSrcRes.ok) {
-                  var akSrcData = await akSrcRes.json();
-                  if (akSrcData && akSrcData.sources && akSrcData.sources.file) {
-                    var akTracks = [];
-                    if (akSrcData.tracks && akSrcData.tracks.length) {
-                      akTracks = akSrcData.tracks.map(function(t) { return { file: t.file || "", label: t.label || "Unknown", kind: t.kind || "captions", default: t.default || false }; });
-                    }
-                    wData = { m3u8: akSrcData.sources.file, tracks: akTracks, intro: akSrcData.intro || null, outro: akSrcData.outro || null };
-                    cacheScrape(wCacheKey, wData);
-                  }
-                }
-              }
+          var wUrl = MEGAPLAY_BASE + "/stream/mal/" + wAnilistInfo.malId + "/" + wEpisode + "/" + wLang;
+          var wResp = await proxyFetch(wUrl);
+          if (wResp.ok) {
+            var wHtml = await wResp.text();
+            var wMatch = wHtml.match(/data-id="(\d+)"/);
+            if (wMatch) {
+              var wSource = await getSource(Number(wMatch[1]), "megaplay");
+              if (!wScraped) wScraped = {};
+              wScraped[wLang] = Object.assign({ lang: wLang }, formatResult(wSource, { mal_id: String(wAnilistInfo.malId), episode: wEpisode, source: "megaplay", dataId: Number(wMatch[1]) }));
             }
           }
-        } catch (e) { wData = null; }
+        } catch (e) {}
       }
 
-      if (!wData) {
+      // Step 3: If still missing, try AniList ID endpoint
+      if (!wScraped || !wScraped[wLang]) {
         try {
-          if (!wEmbedUrl) wEmbedUrl = "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang;
-          var mpRes = await fetch(wEmbedUrl, { headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/" } });
-          if (mpRes.ok) {
-            var mpHtml = await mpRes.text();
-            var dataIdMatch = mpHtml.match(/data-id="(\d+)"/);
-            if (dataIdMatch) {
-              var mpSrcRes = await fetch("https://megaplay.buzz/stream/getSources?id=" + dataIdMatch[1], {
-                headers: { "User-Agent": UA, "Referer": "https://megaplay.buzz/", "X-Requested-With": "XMLHttpRequest" }
-              });
-              if (mpSrcRes.ok) {
-                var mpSrcData = await mpSrcRes.json();
-                if (mpSrcData && mpSrcData.sources && mpSrcData.sources.file) {
-                  var mpTracks = [];
-                  if (mpSrcData.tracks && mpSrcData.tracks.length) {
-                    mpTracks = mpSrcData.tracks.map(function(t) { return { file: t.file || "", label: t.label || "Unknown", kind: t.kind || "captions", default: t.default || false }; });
-                  }
-                  wData = { m3u8: mpSrcData.sources.file, tracks: mpTracks, intro: mpSrcData.intro || null, outro: mpSrcData.outro || null };
-                  cacheScrape(wCacheKey, wData);
-                }
-              }
+          var wUrl2 = MEGAPLAY_BASE + "/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang;
+          var wResp2 = await proxyFetch(wUrl2);
+          if (wResp2.ok) {
+            var wHtml2 = await wResp2.text();
+            var wMatch2 = wHtml2.match(/data-id="(\d+)"/);
+            if (wMatch2) {
+              var wSource2 = await getSource(Number(wMatch2[1]), "megaplay");
+              if (!wScraped) wScraped = {};
+              wScraped[wLang] = Object.assign({ lang: wLang }, formatResult(wSource2, { mal_id: String(wAnilistInfo.malId), episode: wEpisode, source: "megaplay", dataId: Number(wMatch2[1]) }));
             }
           }
-        } catch (e) { wData = null; }
+        } catch (e) {}
       }
 
-      if (!wData) {
-        var notAvailPage = '<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,#1a0505 0%,#060202 70%);font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;color:#ffe6e8;display:flex;align-items:center;justify-content:center;overflow:hidden}.box{text-align:center;padding:40px;border:1px solid rgba(255,30,60,0.3);border-radius:16px;background:rgba(255,30,60,0.05);backdrop-filter:blur(10px);max-width:400px}.icon{width:60px;height:60px;margin:0 auto 20px;border-radius:50%;background:linear-gradient(135deg,#ff6b35,#f72585);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(255,30,60,0.3)}.icon svg{width:28px;height:28px;fill:#fff}h2{font-size:18px;margin-bottom:8px;color:#ff6b35}p{font-size:13px;color:rgba(255,230,232,0.5);line-height:1.5}.tag{display:inline-block;margin-top:16px;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:1px;background:rgba(255,107,53,0.15);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)}</style></head><body><div class="box"><div class="icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div><h2>Not Available</h2><p>' + wLang.toUpperCase() + ' stream not available on<br><strong>MEGAPLAY</strong> for Episode ' + wEpisode + '</p><div class="tag">TRY ANOTHER SERVER</div></div></body></html>';
-        return new Response(notAvailPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+      if (!wScraped || !wScraped[wLang]) {
+        return new Response(JSON.stringify({ error: "MegaPlay: no source found for " + wTitle + " ep " + wEpisode + " " + wLang }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
       }
-      var wCfg = { m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wData.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })), tracks: (wData.tracks || []).map(function(t) { return Object.assign({}, t, { file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/" })) : "" }); }), intro: wData.intro || null, outro: wData.outro || null, title: wTitle + " - Ep " + wEpisode, embedUrl: wEmbedUrl || "https://megaplay.buzz/stream/ani/" + wAnilistId + "/" + wEpisode + "/" + wLang };
-      var wPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(wCfg) + ";</script></head>");
-      return new Response(wPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
+
+      var wResult = wScraped[wLang];
+
+      // Proxy m3u8 and track URLs through our proxy so they work from browser
+      if (wResult.m3u8) {
+        wResult.m3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(wResult.m3u8) + "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" }));
+      }
+      if (wResult.tracks) {
+        wResult.tracks = wResult.tracks.map(function(t) {
+          return Object.assign({}, t, { file: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + encodeURIComponent(JSON.stringify({ "Referer": "https://megaplay.buzz/" })) });
+        });
+      }
+
+      // Build response matching our standard player format
+      var wCfg = {
+        m3u8: wResult.m3u8,
+        tracks: wResult.tracks || [],
+        intro: wResult.intro || null,
+        outro: wResult.outro || null,
+        title: wTitle + " - Episode " + wEpisode + " (" + wLang.toUpperCase() + ")",
+      };
+
+      // Also return available languages
+      var wAvail = {};
+      if (wScraped.sub) wAvail.sub = true;
+      if (wScraped.dub) wAvail.dub = true;
+
+      return new Response(JSON.stringify({ ok: true, anilist_id: wAnilistId, mal_id: wAnilistInfo.malId, episode: wEpisode, title: wTitle, available: wAvail, config: wCfg }), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
     }
 
     function serveAnikageServer(aniId, ep, lang, serverName) {
@@ -1954,37 +2114,72 @@ async function handleRequest(request) {
         var wData = null;
         var usedServer = serverName;
 
-        // Fire requested provider + all others in parallel, take first success
-        var providerPromises = allProviders.map(function(p) {
-          return scrapeVaromine(aniId, ep, lang, p).then(function(d) { return { server: p, data: d }; });
-        });
-        // Also fire the requested one first for priority
-        var firstResult = await scrapeVaromine(aniId, ep, lang, serverName);
-        if (firstResult) {
-          wData = firstResult;
-          usedServer = serverName;
-        } else {
-          // Race remaining providers
+        // Step 1: Try requested provider first with 12s timeout
+        try {
+          wData = await Promise.race([
+            scrapeVaromine(aniId, ep, lang, serverName),
+            new Promise(function(_, rej) { setTimeout(function() { rej("timeout"); }, 12000); })
+          ]);
+          if (wData) usedServer = serverName;
+        } catch (e) { wData = null; }
+
+        // Step 2: If requested provider failed, race ALL remaining in parallel
+        if (!wData) {
           var remaining = allProviders.filter(function(p) { return p !== serverName; });
+          var firstWinner = null;
+          var allSettled = false;
           var remainingPromises = remaining.map(function(p) {
-            return scrapeVaromine(aniId, ep, lang, p).then(function(d) { return { server: p, data: d }; });
+            return scrapeVaromine(aniId, ep, lang, p).then(function(d) {
+              if (!allSettled && d && !firstWinner) { firstWinner = { server: p, data: d }; allSettled = true; }
+            }).catch(function() {});
           });
-          // Use Promise.any-like: settle first non-null
-          var result = await new Promise(function(resolve) {
+          await new Promise(function(resolve) {
             var settled = 0;
             var total = remainingPromises.length;
-            if (total === 0) { resolve(null); return; }
+            if (total === 0) { resolve(); return; }
             remainingPromises.forEach(function(pr) {
-              pr.then(function(r) {
-                if (!wData && r.data) { wData = r.data; usedServer = r.server; resolve(r); }
+              pr.then(function() {
                 settled++;
-                if (settled >= total) resolve(null);
+                if (firstWinner || settled >= total) resolve();
               }).catch(function() {
                 settled++;
-                if (settled >= total) resolve(null);
+                if (firstWinner || settled >= total) resolve();
               });
             });
           });
+          if (firstWinner) {
+            wData = firstWinner.data;
+            usedServer = firstWinner.server;
+          }
+        }
+
+        // Step 3: If tracks empty, try to get subtitle VTT URLs from softsub sources
+        if (wData && (!wData.tracks || wData.tracks.length === 0)) {
+          try {
+            var subTracks = [];
+            var subProviders = ["neko", "koto", "miko", "dib", "wave", "senshi"];
+            for (var sp = 0; sp < subProviders.length && subTracks.length === 0; sp++) {
+              var spUrl = ANIKAGE_API_BASE + "/" + aniId + "/episodes/" + ep + "/sources?provider=" + subProviders[sp] + "&lang=" + (lang || "sub");
+              var spR = await fetch(spUrl, { headers: ANIKAGE_HEADERS, signal: AbortSignal.timeout(10000) });
+              if (spR.ok) {
+                var spData = await spR.json();
+                if (spData && spData.sources) {
+                  for (var si = 0; si < spData.sources.length; si++) {
+                    if (spData.sources[si].embedUrl) {
+                      var sm = spData.sources[si].embedUrl.match(/[?&]sub=([^&]+)/);
+                      if (sm) {
+                        var su = decodeURIComponent(sm[1]);
+                        if (su && su.startsWith("http") && !subTracks.some(function(t) { return t.file === su; })) {
+                          subTracks.push({ file: su, label: "English", kind: "captions", default: subTracks.length === 0 });
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            if (subTracks.length > 0) wData.tracks = subTracks;
+          } catch (e) {}
         }
 
         if (!wData) {
