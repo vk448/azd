@@ -1991,8 +1991,8 @@ async function handleRequest(request) {
       }
     }
 
-    // ====== MegaPlay Stream API ======
-    // GET /api/watch/megaplay/{anilist-id}/{episode}/{language}  — input is AniList ID, auto-converts to MAL
+    // ====== MegaPlay Watch Page ======
+    // GET /api/watch/megaplay/{anilist-id}/{episode}/{language}  — plays video in our player
     var megaplayStreamMatch = url.match(/^\/api\/watch\/megaplay\/(\d+)\/(\d+)\/(sub|dub)$/);
     if (megaplayStreamMatch) {
       var mpAnilistId = Number(megaplayStreamMatch[1]);
@@ -2052,30 +2052,20 @@ async function handleRequest(request) {
         return new Response(JSON.stringify({ success: false, error: "No stream found for AniList " + mpAnilistId + " (MAL " + mpMalId + ") ep " + mpEpisode + " " + mpLang }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
       }
 
-      // Proxy m3u8 and subtitle URLs through our proxy so they work from any browser
+      // Build player config with proxied URLs
       var mpProxyHeaders = encodeURIComponent(JSON.stringify({ "User-Agent": UA, "Referer": "https://megaplay.buzz/", "Origin": "https://megaplay.buzz" }));
-      var mpProxiedM3u8 = serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(mpResult.m3u8) + "&headers=" + mpProxyHeaders;
-      var mpProxiedTracks = (mpResult.tracks || []).map(function(t) {
-        return { label: t.label || "English", lang: t.srclang || t.label ? t.label.substring(0, 2).toLowerCase() : "en", url: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + mpProxyHeaders : "", kind: t.kind || "captions", default: t.default || false };
-      }).filter(function(t) { return t.url; });
-
-      var mpResponse = {
-        success: true,
-        source: "megaplay",
-        anilist_id: mpAnilistId,
-        mal_id: mpMalId,
-        episode: mpEpisode,
-        language: mpLang,
-        title: mpTitle || ("MAL " + mpMalId),
-        stream: mpProxiedM3u8,
-        subtitles: mpProxiedTracks,
+      var mpPlayerConfig = {
+        m3u8: serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(mpResult.m3u8) + "&headers=" + mpProxyHeaders,
+        tracks: (mpResult.tracks || []).map(function(t) {
+          return { label: t.label || "English", lang: t.srclang || t.label ? t.label.substring(0, 2).toLowerCase() : "en", file: t.file ? serverHost + "/api/proxy/m3u8?url=" + encodeURIComponent(t.file) + "&headers=" + mpProxyHeaders : "", kind: t.kind || "captions", default: t.default || false };
+        }).filter(function(t) { return t.url; }),
         intro: mpResult.intro || null,
         outro: mpResult.outro || null,
-        dataId: mpResult.dataId || null,
-        _raw: { m3u8: mpResult.m3u8, tracks: mpResult.tracks || [] }
+        title: mpTitle + " - Ep " + mpEpisode + " (" + mpLang + ")"
       };
 
-      return new Response(JSON.stringify(mpResponse), { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+      var mpPlayerPage = PLAYER_HTML.replace("</head>", '<script>window.__PLAYER_CONFIG__=' + JSON.stringify(mpPlayerConfig) + ";</script></head>");
+      return new Response(mpPlayerPage, { status: 200, headers: Object.assign({}, corsHeaders, { "Content-Type": "text/html; charset=utf-8" }) });
     }
 
     if (url === "/api/health") {
