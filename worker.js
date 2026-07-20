@@ -1992,25 +1992,19 @@ async function handleRequest(request) {
     }
 
     // ====== MegaPlay Stream API ======
-    // GET /api/watch/megaplay/{mal-id}/{episode}/{language}  — extract m3u8 + subtitles from MegaPlay
-    // GET /api/watch/megaplay/ani/{anilist-id}/{episode}/{language}  — same but via AniList ID
-    var megaplayStreamMatch = url.match(/^\/api\/watch\/megaplay\/(?:(ani)\/)?(\d+)\/(\d+)\/(sub|dub)$/);
+    // GET /api/watch/megaplay/{anilist-id}/{episode}/{language}  — input is AniList ID, auto-converts to MAL
+    var megaplayStreamMatch = url.match(/^\/api\/watch\/megaplay\/(\d+)\/(\d+)\/(sub|dub)$/);
     if (megaplayStreamMatch) {
-      var isAniId = megaplayStreamMatch[1] === "ani";
-      var inputId = Number(megaplayStreamMatch[2]);
-      var mpEpisode = Number(megaplayStreamMatch[3]);
-      var mpLang = megaplayStreamMatch[4];
+      var mpAnilistId = Number(megaplayStreamMatch[1]);
+      var mpEpisode = Number(megaplayStreamMatch[2]);
+      var mpLang = megaplayStreamMatch[3];
 
-      // Resolve AniList → MAL if needed
-      var mpMalId = inputId;
-      var mpTitle = "";
-      if (isAniId) {
-        var mpAniInfo = await fetchAnilistInfo(inputId);
-        mpMalId = mpAniInfo.malId;
-        mpTitle = mpAniInfo.title;
-        if (!mpMalId) {
-          return new Response(JSON.stringify({ success: false, error: "No MAL ID found for AniList ID " + inputId }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
-        }
+      // Always resolve AniList → MAL
+      var mpAniInfo = await fetchAnilistInfo(mpAnilistId);
+      var mpMalId = mpAniInfo.malId;
+      var mpTitle = mpAniInfo.title || "";
+      if (!mpMalId) {
+        return new Response(JSON.stringify({ success: false, error: "No MAL ID found for AniList ID " + mpAnilistId }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
       }
 
       // Strategy 1: Try scrapeMegaplay (MAL-based, fetches embed page → data-id → getSources)
@@ -2022,8 +2016,8 @@ async function handleRequest(request) {
         }
       } catch (e) { /* fall through */ }
 
-      // Strategy 2: Try AniList ID endpoint on MegaPlay (if input was AniList ID)
-      if (!mpResult && isAniId) {
+      // Strategy 2: Try AniList ID endpoint on MegaPlay
+      if (!mpResult) {
         try {
           var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + inputId + "/" + mpEpisode + "/" + mpLang;
           var mpAniResp = await proxyFetch(mpAniUrl);
@@ -2055,7 +2049,7 @@ async function handleRequest(request) {
       }
 
       if (!mpResult || !mpResult.m3u8) {
-        return new Response(JSON.stringify({ success: false, error: "No stream found for MAL " + mpMalId + " ep " + mpEpisode + " " + mpLang }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
+        return new Response(JSON.stringify({ success: false, error: "No stream found for AniList " + mpAnilistId + " (MAL " + mpMalId + ") ep " + mpEpisode + " " + mpLang }), { status: 404, headers: Object.assign({}, corsHeaders, { "Content-Type": "application/json" }) });
       }
 
       // Proxy m3u8 and subtitle URLs through our proxy so they work from any browser
@@ -2068,6 +2062,7 @@ async function handleRequest(request) {
       var mpResponse = {
         success: true,
         source: "megaplay",
+        anilist_id: mpAnilistId,
         mal_id: mpMalId,
         episode: mpEpisode,
         language: mpLang,
