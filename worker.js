@@ -1992,9 +1992,9 @@ async function handleRequest(request) {
     }
 
     // ====== MegaPlay Stream API ======
-    // GET /api/megaplay/stream/{mal-id}/{episode}/{language}  — extract m3u8 + subtitles from MegaPlay
-    // GET /api/megaplay/stream/ani/{anilist-id}/{episode}/{language}  — same but via AniList ID
-    var megaplayStreamMatch = url.match(/^\/api\/megaplay\/stream\/(?:(ani)\/)?(\d+)\/(\d+)\/(sub|dub)$/);
+    // GET /api/watch/megaplay/{mal-id}/{episode}/{language}  — extract m3u8 + subtitles from MegaPlay
+    // GET /api/watch/megaplay/ani/{anilist-id}/{episode}/{language}  — same but via AniList ID
+    var megaplayStreamMatch = url.match(/^\/api\/watch\/megaplay\/(?:(ani)\/)?(\d+)\/(\d+)\/(sub|dub)$/);
     if (megaplayStreamMatch) {
       var isAniId = megaplayStreamMatch[1] === "ani";
       var inputId = Number(megaplayStreamMatch[2]);
