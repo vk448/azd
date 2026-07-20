@@ -720,45 +720,53 @@ async function scrapeMegaplay(malId, episode) {
 }
 
 async function scrapeNekoStream(malId, episode) {
-  var ts = Math.floor(Date.now() / 1000);
-  var r1 = await fetch("https://mapper.nekostream.site/api/mal/" + malId + "/" + episode + "/" + ts, { headers: { "User-Agent": UA } });
-  if (!r1.ok) throw new Error("Mapper " + r1.status);
-  var servers = await r1.json();
-  if (servers.error) throw new Error(servers.message || servers.error);
-  var output = {};
-  var base = { mal_id: String(malId), episode: episode };
-  var entries = Object.entries(servers);
-  for (var i = 0; i < entries.length; i++) {
-    var serverName = entries[i][0];
-    var data = entries[i][1];
-    if (serverName === "status") continue;
-    var displayName = serverName.replace(/-$/, "");
-    var langs = ["sub", "dub"];
-    for (var j = 0; j < langs.length; j++) {
-      var lang = langs[j];
-      if (data[lang] && data[lang].url && !output[lang]) {
-        try {
-          var r2 = await fetch("https://anikototv.to/ajax/server?get=" + encodeURIComponent(data[lang].url), {
-            headers: { "User-Agent": UA, "X-Requested-With": "XMLHttpRequest", "Referer": "https://anikototv.to/" }
-          });
-          var d2 = await r2.json();
-          if (d2.status !== 200 || !d2.result || !d2.result.url) continue;
-          var playerUrl = d2.result.url;
-          var hash = playerUrl.split("#")[1];
-          if (!hash) continue;
-          var m3u8 = fromBase64(hash);
-          if (!m3u8.includes(".m3u8")) continue;
-          var skip = d2.result.skip_data;
-          output[lang] = Object.assign({}, base, {
-            m3u8: m3u8, server: displayName, source: "nekostream", tracks: [],
-            intro: skip && skip.intro && skip.intro[0] ? { start: skip.intro[0], end: skip.intro[1] } : null,
-            outro: skip && skip.outro && skip.outro[0] ? { start: skip.outro[0], end: skip.outro[1] } : null
-          });
-        } catch (e) {}
+  var lastErr = null;
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      var ts = Math.floor(Date.now() / 1000) + attempt;
+      var r1 = await fetch("https://mapper.nekostream.site/api/mal/" + malId + "/" + episode + "/" + ts, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) });
+      if (!r1.ok) throw new Error("Mapper " + r1.status);
+      var servers = await r1.json();
+      if (servers.error) throw new Error(servers.message || servers.error);
+      var output = {};
+      var base = { mal_id: String(malId), episode: episode };
+      var entries = Object.entries(servers);
+      for (var i = 0; i < entries.length; i++) {
+        var serverName = entries[i][0];
+        var data = entries[i][1];
+        if (serverName === "status") continue;
+        var displayName = serverName.replace(/-$/, "");
+        var langs = ["sub", "dub"];
+        for (var j = 0; j < langs.length; j++) {
+          var lang = langs[j];
+          if (data[lang] && data[lang].url && !output[lang]) {
+            try {
+              var r2 = await fetch("https://anikototv.to/ajax/server?get=" + encodeURIComponent(data[lang].url), {
+                headers: { "User-Agent": UA, "X-Requested-With": "XMLHttpRequest", "Referer": "https://anikototv.to/" },
+                signal: AbortSignal.timeout(10000)
+              });
+              var d2 = await r2.json();
+              if (d2.status !== 200 || !d2.result || !d2.result.url) continue;
+              var playerUrl = d2.result.url;
+              var hash = playerUrl.split("#")[1];
+              if (!hash) continue;
+              var m3u8 = fromBase64(hash);
+              if (!m3u8.includes(".m3u8")) continue;
+              var skip = d2.result.skip_data;
+              output[lang] = Object.assign({}, base, {
+                m3u8: m3u8, server: displayName, source: "nekostream", tracks: [],
+                intro: skip && skip.intro && skip.intro[0] ? { start: skip.intro[0], end: skip.intro[1] } : null,
+                outro: skip && skip.outro && skip.outro[0] ? { start: skip.outro[0], end: skip.outro[1] } : null
+              });
+            } catch (e) {}
+          }
+        }
       }
-    }
+      if (Object.keys(output).length > 0) return output;
+      lastErr = new Error("No streams found from nekostream");
+    } catch (e) { lastErr = e; }
   }
-  return output;
+  throw lastErr || new Error("NekoStream failed");
 }
 
 async function scrapeBoth(malId, episode) {
@@ -1618,13 +1626,16 @@ const PLAYER_HTML = `<!DOCTYPE html>
   }
 
   var hls=null;
+  var hlsRetries=0;
+  var hlsMaxRetries=5;
   var src=cfg.m3u8;
   if(src){
     if(window.Hls&&Hls.isSupported()){
-      hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,startFragPrefetch:true,debug:false});
+      hls=new Hls({maxBufferLength:30,maxMaxBufferLength:60,startFragPrefetch:true,debug:false,manifestLoadingTimeOut:15000,manifestLoadingMaxRetry:4,manifestLoadingRetryDelay:1000,levelLoadingTimeOut:15000,levelLoadingMaxRetry:4,levelLoadingRetryDelay:1000,fragLoadingTimeOut:20000,fragLoadingMaxRetry:4,fragLoadingRetryDelay:1000});
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED,function(e,data){
+        hlsRetries=0;
         var levels=data.levels||[];
         var qMenu=qualityMenu.querySelector('.menu-section');
         qMenu.innerHTML='<div class="menu-heading">Quality</div><div class="menu-item selected" data-quality="-1">Auto <span class="check">&#10003;</span></div>';
@@ -1646,7 +1657,19 @@ const PLAYER_HTML = `<!DOCTYPE html>
         });
         video.play();
       });
-      hls.on(Hls.Events.ERROR,function(e,data){if(data.fatal){if(data.type===Hls.ErrorTypes.NETWORK_ERROR){hls.startLoad()}else if(data.type===Hls.ErrorTypes.MEDIA_ERROR){hls.recoverMediaError()}}});
+      hls.on(Hls.Events.ERROR,function(e,data){
+        if(!data.fatal)return;
+        if(data.type===Hls.ErrorTypes.NETWORK_ERROR){
+          if(hlsRetries<hlsMaxRetries){
+            hlsRetries++;
+            setTimeout(function(){hls.startLoad()},1000*hlsRetries);
+          }else{
+            spinner.classList.remove('show');
+          }
+        }else if(data.type===Hls.ErrorTypes.MEDIA_ERROR){
+          hls.recoverMediaError();
+        }
+      });
     }else if(video.canPlayType('application/vnd.apple.mpegurl')){
       video.src=src;video.addEventListener('loadedmetadata',function(){video.play()});
     }
@@ -1968,8 +1991,17 @@ async function handleRequest(request) {
       var targetUrl = reqUrl.searchParams.get("url");
       if (!targetUrl) return new Response("Missing url param", { status: 400 });
       var customHeaders = reqUrl.searchParams.get("headers");
-      var isMegacloud = targetUrl.indexOf("megacloud.animanga.fun") > -1;
-      var fetchHeaders = isMegacloud ? {} : Object.assign({}, CDN_HEADERS);
+      var fetchHeaders = { "User-Agent": UA, "Accept": "*/*", "Accept-Encoding": "identity" };
+      // Use correct base referer per CDN
+      if (targetUrl.indexOf("nekostream") > -1 || targetUrl.indexOf("lostproject") > -1) {
+        fetchHeaders["Referer"] = "https://anikototv.to/";
+        fetchHeaders["Origin"] = "https://anikototv.to";
+      } else if (targetUrl.indexOf("megacloud") > -1) {
+        // no referer for megacloud
+      } else {
+        fetchHeaders["Referer"] = "https://megaplay.buzz/";
+        fetchHeaders["Origin"] = "https://megaplay.buzz";
+      }
       if (customHeaders) {
         try { var parsed = JSON.parse(customHeaders); Object.assign(fetchHeaders, parsed); } catch {}
       }
@@ -2005,9 +2037,9 @@ async function handleRequest(request) {
         var body = await r.text();
         var hParam = customHeaders ? "&headers=" + encodeURIComponent(customHeaders) : "";
         var rewritten = rewriteM3u8(body, targetUrl, serverHost, hParam);
-        var respHeaders = { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=60" };
+        var respHeaders = { "Content-Type": "application/vnd.apple.mpegurl", "Cache-Control": "public, max-age=30" };
         Object.assign(respHeaders, corsHeaders);
-        // Cache rewritten m3u8 for 60s
+        // Only cache successful m3u8 responses
         cacheScrape(pCacheKey, { body: rewritten, headers: respHeaders });
         return new Response(rewritten, { status: 200, headers: respHeaders });
       } else {
@@ -2046,57 +2078,62 @@ async function handleRequest(request) {
         return true;
       }
 
-      // Strategy 1: Try NekoStream first (nekostream.site URLs work)
+      // Try all strategies, retry once if all fail
       var mpResult = null;
-      try {
-        var mpNeko = await scrapeNekoStream(mpMalId, mpEpisode);
-        if (mpNeko && mpNeko[mpLang] && isValidStream(mpNeko[mpLang].m3u8)) {
-          mpResult = mpNeko[mpLang];
+      for (var mpAttempt = 0; mpAttempt < 2 && !mpResult; mpAttempt++) {
+        if (mpAttempt > 0) await new Promise(function(rs) { setTimeout(rs, 1500); });
+
+        // Strategy 1: Try NekoStream first (nekostream.site URLs work)
+        try {
+          var mpNeko = await scrapeNekoStream(mpMalId, mpEpisode);
+          if (mpNeko && mpNeko[mpLang] && isValidStream(mpNeko[mpLang].m3u8)) {
+            mpResult = mpNeko[mpLang];
+          }
+        } catch (e) { /* fall through */ }
+
+        // Strategy 2: Try scrapeMegaplay but reject vibeplayer URLs
+        if (!mpResult) {
+          try {
+            var mpScraped = await scrapeMegaplay(mpMalId, mpEpisode);
+            if (mpScraped && mpScraped[mpLang] && isValidStream(mpScraped[mpLang].m3u8)) {
+              mpResult = mpScraped[mpLang];
+            }
+          } catch (e) { /* fall through */ }
         }
-      } catch (e) { /* fall through */ }
 
-      // Strategy 2: Try scrapeMegaplay but reject vibeplayer URLs
-      if (!mpResult) {
-        try {
-          var mpScraped = await scrapeMegaplay(mpMalId, mpEpisode);
-          if (mpScraped && mpScraped[mpLang] && isValidStream(mpScraped[mpLang].m3u8)) {
-            mpResult = mpScraped[mpLang];
-          }
-        } catch (e) { /* fall through */ }
-      }
-
-      // Strategy 3: Try AniList ID endpoint on MegaPlay
-      if (!mpResult) {
-        try {
-          var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + mpAnilistId + "/" + mpEpisode + "/" + mpLang;
-          var mpAniResp = await proxyFetch(mpAniUrl);
-          if (mpAniResp.ok) {
-            var mpAniHtml = await mpAniResp.text();
-            var mpAniMatch = mpAniHtml.match(/data-id="(\d+)"/);
-            if (mpAniMatch) {
-              var mpAniSource = await getSource(Number(mpAniMatch[1]), "megaplay");
-              var mpAniFormatted = Object.assign({ lang: mpLang }, formatResult(mpAniSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpAniMatch[1]) }));
-              if (isValidStream(mpAniFormatted.m3u8)) mpResult = mpAniFormatted;
+        // Strategy 3: Try AniList ID endpoint on MegaPlay
+        if (!mpResult) {
+          try {
+            var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + mpAnilistId + "/" + mpEpisode + "/" + mpLang;
+            var mpAniResp = await proxyFetch(mpAniUrl);
+            if (mpAniResp.ok) {
+              var mpAniHtml = await mpAniResp.text();
+              var mpAniMatch = mpAniHtml.match(/data-id="(\d+)"/);
+              if (mpAniMatch) {
+                var mpAniSource = await getSource(Number(mpAniMatch[1]), "megaplay");
+                var mpAniFormatted = Object.assign({ lang: mpLang }, formatResult(mpAniSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpAniMatch[1]) }));
+                if (isValidStream(mpAniFormatted.m3u8)) mpResult = mpAniFormatted;
+              }
             }
-          }
-        } catch (e) { /* fall through */ }
-      }
+          } catch (e) { /* fall through */ }
+        }
 
-      // Strategy 4: Try direct MAL endpoint via proxy
-      if (!mpResult) {
-        try {
-          var mpDirectUrl = MEGAPLAY_BASE + "/stream/mal/" + mpMalId + "/" + mpEpisode + "/" + mpLang;
-          var mpDirectResp = await proxyFetch(mpDirectUrl);
-          if (mpDirectResp.ok) {
-            var mpDirectHtml = await mpDirectResp.text();
-            var mpDirectMatch = mpDirectHtml.match(/data-id="(\d+)"/);
-            if (mpDirectMatch) {
-              var mpDirectSource = await getSource(Number(mpDirectMatch[1]), "megaplay");
-              var mpDirectFormatted = Object.assign({ lang: mpLang }, formatResult(mpDirectSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpDirectMatch[1]) }));
-              if (isValidStream(mpDirectFormatted.m3u8)) mpResult = mpDirectFormatted;
+        // Strategy 4: Try direct MAL endpoint via proxy
+        if (!mpResult) {
+          try {
+            var mpDirectUrl = MEGAPLAY_BASE + "/stream/mal/" + mpMalId + "/" + mpEpisode + "/" + mpLang;
+            var mpDirectResp = await proxyFetch(mpDirectUrl);
+            if (mpDirectResp.ok) {
+              var mpDirectHtml = await mpDirectResp.text();
+              var mpDirectMatch = mpDirectHtml.match(/data-id="(\d+)"/);
+              if (mpDirectMatch) {
+                var mpDirectSource = await getSource(Number(mpDirectMatch[1]), "megaplay");
+                var mpDirectFormatted = Object.assign({ lang: mpLang }, formatResult(mpDirectSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpDirectMatch[1]) }));
+                if (isValidStream(mpDirectFormatted.m3u8)) mpResult = mpDirectFormatted;
+              }
             }
-          }
-        } catch (e) { /* fall through */ }
+          } catch (e) { /* fall through */ }
+        }
       }
 
       if (!mpResult || !mpResult.m3u8) {
