@@ -2083,25 +2083,15 @@ async function handleRequest(request) {
       for (var mpAttempt = 0; mpAttempt < 2 && !mpResult; mpAttempt++) {
         if (mpAttempt > 0) await new Promise(function(rs) { setTimeout(rs, 1500); });
 
-        // Strategy 1: Try NekoStream first (nekostream.site URLs work)
+        // Strategy 1: MegaPlay direct — most reliable, returns nekostream.site + subtitles
         try {
-          var mpNeko = await scrapeNekoStream(mpMalId, mpEpisode);
-          if (mpNeko && mpNeko[mpLang] && isValidStream(mpNeko[mpLang].m3u8)) {
-            mpResult = mpNeko[mpLang];
+          var mpScraped = await scrapeMegaplay(mpMalId, mpEpisode);
+          if (mpScraped && mpScraped[mpLang] && isValidStream(mpScraped[mpLang].m3u8)) {
+            mpResult = mpScraped[mpLang];
           }
         } catch (e) { /* fall through */ }
 
-        // Strategy 2: Try scrapeMegaplay but reject vibeplayer URLs
-        if (!mpResult) {
-          try {
-            var mpScraped = await scrapeMegaplay(mpMalId, mpEpisode);
-            if (mpScraped && mpScraped[mpLang] && isValidStream(mpScraped[mpLang].m3u8)) {
-              mpResult = mpScraped[mpLang];
-            }
-          } catch (e) { /* fall through */ }
-        }
-
-        // Strategy 3: Try AniList ID endpoint on MegaPlay
+        // Strategy 2: Try AniList ID endpoint on MegaPlay
         if (!mpResult) {
           try {
             var mpAniUrl = MEGAPLAY_BASE + "/stream/ani/" + mpAnilistId + "/" + mpEpisode + "/" + mpLang;
@@ -2118,7 +2108,7 @@ async function handleRequest(request) {
           } catch (e) { /* fall through */ }
         }
 
-        // Strategy 4: Try direct MAL endpoint via proxy
+        // Strategy 3: Try direct MAL endpoint via proxy
         if (!mpResult) {
           try {
             var mpDirectUrl = MEGAPLAY_BASE + "/stream/mal/" + mpMalId + "/" + mpEpisode + "/" + mpLang;
@@ -2131,6 +2121,16 @@ async function handleRequest(request) {
                 var mpDirectFormatted = Object.assign({ lang: mpLang }, formatResult(mpDirectSource, { mal_id: String(mpMalId), episode: mpEpisode, source: "megaplay", dataId: Number(mpDirectMatch[1]) }));
                 if (isValidStream(mpDirectFormatted.m3u8)) mpResult = mpDirectFormatted;
               }
+            }
+          } catch (e) { /* fall through */ }
+        }
+
+        // Strategy 4: NekoStream mapper (fallback, usually returns dead vibeplayer URLs)
+        if (!mpResult) {
+          try {
+            var mpNeko = await scrapeNekoStream(mpMalId, mpEpisode);
+            if (mpNeko && mpNeko[mpLang] && isValidStream(mpNeko[mpLang].m3u8)) {
+              mpResult = mpNeko[mpLang];
             }
           } catch (e) { /* fall through */ }
         }
